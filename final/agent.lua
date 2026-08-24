@@ -37,12 +37,17 @@ local CONFIG = {
         state_collector = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/state_collector.lua",
         command_engine = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/command_engine.lua",
         agent = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/agent.lua",
+        ui_panel = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/ui_panel.lua",
     },
 
     -- Если true, модули загружаются из moduleUrls.
     -- Если false, используется локальный require (для теста в Roblox Studio / local script).
     -- По умолчанию: true при запуске через loadstring (script == nil), иначе false.
     useRemoteModules = (script == nil),
+
+    -- Если true, отображается панель управления (Orion UI).
+    -- Если false, агент запускается сразу без UI.
+    showUI = true,
 }
 -- ==============================================================
 
@@ -68,19 +73,67 @@ local StateCollector = loadModule("state_collector")
 local CommandEngine = loadModule("command_engine")
 local Agent = loadModule("agent")
 
+local HttpClient = loadModule("http_client")
+local StateCollector = loadModule("state_collector")
+local CommandEngine = loadModule("command_engine")
+local Agent = loadModule("agent")
+
 getgenv().StopSanDiegoAgent = false
 
-local http = HttpClient.new(CONFIG.baseUrl)
-local state = StateCollector.new(CONFIG.balancePath)
-local engine = CommandEngine.new()
-local agent = Agent.new(CONFIG, http, state, engine)
+local currentAgent = nil
 
-agent:start()
+local function makeAgent(cfg)
+    local http = HttpClient.new(cfg.baseUrl)
+    local state = StateCollector.new(cfg.balancePath)
+    local engine = CommandEngine.new()
+    local agent = Agent.new(cfg, http, state, engine)
+    return agent
+end
+
+local function startAgent(cfg)
+    if currentAgent then
+        currentAgent:stop()
+        task.wait(0.2)
+    end
+    currentAgent = makeAgent(cfg)
+    currentAgent:start()
+end
+
+local function stopAgent()
+    if currentAgent then
+        currentAgent:stop()
+        currentAgent = nil
+    end
+end
+
+if CONFIG.showUI then
+    local UIPanel = loadModule("ui_panel")
+    local panel = UIPanel.new(CONFIG, {
+        start = function(cfg)
+            startAgent(cfg)
+        end,
+        stop = function()
+            stopAgent()
+        end,
+        sendStatus = function()
+            if currentAgent and currentAgent._sendStatus then
+                currentAgent:_sendStatus()
+            end
+        end,
+        getCommandSpec = function()
+            local engine = CommandEngine.new()
+            return engine:getCommandsSpec()
+        end,
+    })
+    panel:build()
+else
+    startAgent(CONFIG)
+end
 
 -- Фоновый поток для обработки флага остановки
 while not getgenv().StopSanDiegoAgent do
     task.wait(1)
 end
 
-agent:stop()
+stopAgent()
 print("[SanDiegoAgent] stopped")
