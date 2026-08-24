@@ -9,7 +9,15 @@ local Players = game:GetService("Players")
 
 local function loadOrion()
 	local ok, Orion = pcall(function()
-		return loadstring(game:HttpGet("https://raw.githubusercontent.com/OrionLibrary/Orion/main/source.lua"))()
+		local url = "https://raw.githubusercontent.com/OrionLibrary/Orion/main/source.lua"
+		local src = game:HttpGet(url)
+		-- Патчим TextBox Orion: callback на каждое изменение текста и без очистки поля.
+		local pattern = "TextBox%.FocusLost:Connect%(function%(EnterPressed%).-end%)"
+		local replacement = [[TextBox:GetPropertyChangedSignal("Text"):Connect(function()
+			callback(TextBox.Text)
+		end)]]
+		src = src:gsub(pattern, replacement)
+		return loadstring(src)()
 	end)
 	if not ok then
 		warn("[ValueFinder] Failed to load Orion:", tostring(Orion))
@@ -76,28 +84,6 @@ local function searchByValue(root, targetText, exact, onProgress)
 	return found, count
 end
 
-local function getFinderGui()
-	return game.CoreGui:FindFirstChild("Value Finder")
-end
-
-local function getInputText()
-	local gui = getFinderGui()
-	if not gui then return "" end
-	for _, desc in ipairs(gui:GetDescendants()) do
-		if desc.Name == "textBoxFrame" then
-			local info = desc:FindFirstChild("textboxInfo")
-			if info and info:IsA("TextLabel") and info.Text == "Value to find" then
-				for _, inner in ipairs(desc:GetDescendants()) do
-					if inner:IsA("TextBox") then
-						return inner.Text
-					end
-				end
-			end
-		end
-	end
-	return ""
-end
-
 local function buildUI()
 	local Orion = loadOrion()
 	if not Orion then return end
@@ -107,9 +93,9 @@ local function buildUI()
 
 	tabSearch:TextLabel("Enter value to find (number or text)")
 
+	local inputValue = ""
 	tabSearch:TextBox("Value to find", "100", function(text)
-		-- В некоторых executor'ах Orion TextBox callback не срабатывает мгновенно.
-		-- Текст читается напрямую из GUI перед поиском.
+		inputValue = text
 	end)
 
 	local exactMatch = false
@@ -122,14 +108,14 @@ local function buildUI()
 		searchEverywhere = state
 	end)
 
-	tabSearch:TextButton("Search", "Start smooth search", function()
+		tabSearch:TextButton("Search", "Start smooth search", function()
 		local player = Players.LocalPlayer
 		if not player then
 			tabSearch:TextLabel("LocalPlayer not found")
 			return
 		end
 
-		local targetText = getInputText()
+		local targetText = inputValue
 		if targetText == "" then
 			tabSearch:TextLabel("Enter a value first")
 			return
