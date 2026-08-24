@@ -65,6 +65,29 @@ local function waitForChild(parent, name, timeout)
 	return nil
 end
 
+local textClasses = {
+	TextLabel = true,
+	TextBox = true,
+	TextButton = true,
+	TextBlock = true,
+}
+
+local function getCompareValue(instance)
+	if instance:IsA("ValueBase") then
+		local ok, value = pcall(function()
+			return instance.Value
+		end)
+		if ok then return value end
+	end
+	if textClasses[instance.ClassName] then
+		local ok, text = pcall(function()
+			return instance.Text
+		end)
+		if ok then return text end
+	end
+	return nil
+end
+
 local function searchByValue(root, targetText, exact, onProgress)
 	local found = {}
 	local count = 0
@@ -74,13 +97,9 @@ local function searchByValue(root, targetText, exact, onProgress)
 		local current = table.remove(stack)
 		local children = current:GetChildren()
 		for _, child in ipairs(children) do
-			if child:IsA("ValueBase") then
-				local ok, value = pcall(function()
-					return child.Value
-				end)
-				if ok and matchesValue(value, targetText, exact) then
-					table.insert(found, child)
-				end
+			local compareValue = getCompareValue(child)
+			if compareValue and matchesValue(compareValue, targetText, exact) then
+				table.insert(found, child)
 			end
 			table.insert(stack, child)
 			count = count + 1
@@ -94,6 +113,34 @@ local function searchByValue(root, targetText, exact, onProgress)
 	end
 
 	return found, count
+end
+
+local function dumpPlayerValues()
+	local player = Players.LocalPlayer
+	if not player then
+		print("[ValueFinder] LocalPlayer not found")
+		return
+	end
+	print("[ValueFinder] Dumping values under player...")
+	local roots = {
+		waitForChild(player, "leaderstats", 3),
+		waitForChild(player, "PlayerGui", 3),
+		waitForChild(player, "Backpack", 3),
+		player,
+	}
+	local count = 0
+	for _, root in ipairs(roots) do
+		if root then
+			for _, desc in ipairs(root:GetDescendants()) do
+				local compareValue = getCompareValue(desc)
+				if compareValue then
+					count = count + 1
+					print("[ValueFinder] Dump: " .. desc:GetFullName() .. " = " .. tostring(compareValue) .. " (" .. desc.ClassName .. ")")
+				end
+			end
+		end
+	end
+	print("[ValueFinder] Dumped " .. tostring(count) .. " values")
 end
 
 local function buildUI()
@@ -146,7 +193,13 @@ local function buildUI()
 				waitForChild(player, "Backpack", 3),
 				player,
 			}
-			print("[ValueFinder] Roots: leaderstats, PlayerGui, Backpack, player")
+			for i, root in ipairs(roots) do
+				if root then
+					print("[ValueFinder] Root " .. tostring(i) .. ": " .. root:GetFullName() .. " (children: " .. tostring(#root:GetChildren()) .. ")")
+				else
+					print("[ValueFinder] Root " .. tostring(i) .. ": nil")
+				end
+			end
 		end
 
 		task.spawn(function()
@@ -181,9 +234,10 @@ local function buildUI()
 				local item = allFound[i]
 				local path = item:GetFullName()
 				local currentValue = "?"
-				pcall(function()
-					currentValue = tostring(item.Value)
-				end)
+				local compareValue = getCompareValue(item)
+				if compareValue then
+					currentValue = tostring(compareValue)
+				end
 				print("[ValueFinder] Result: " .. item.Name .. " = " .. currentValue .. " (" .. item.ClassName .. ") at " .. path)
 				tabSearch:TextButton("Copy: " .. item.Name, path, function()
 					copyToClipboard(path)
@@ -191,6 +245,10 @@ local function buildUI()
 				end)
 			end
 		end)
+	end)
+
+	tabSearch:TextButton("Dump values", "Print all values under player", function()
+		dumpPlayerValues()
 	end)
 
 	print("[ValueFinder] UI built")
