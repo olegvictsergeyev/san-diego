@@ -40,8 +40,9 @@ local CONFIG = {
     },
 
     -- Если true, модули загружаются из moduleUrls.
-    -- Если false, используется локальный require (для теста в Roblox Studio).
-    useRemoteModules = true,
+    -- Если false, используется локальный require (для теста в Roblox Studio / local script).
+    -- По умолчанию: true при запуске через loadstring (script == nil), иначе false.
+    useRemoteModules = (script == nil),
 }
 -- ==============================================================
 
