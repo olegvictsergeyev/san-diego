@@ -53,6 +53,18 @@ local function matchesValue(value, targetText, exact)
 	return string.find(valueText, targetText, 1, true) ~= nil
 end
 
+local function waitForChild(parent, name, timeout)
+	if not parent then return nil end
+	timeout = timeout or 3
+	local ok, child = pcall(function()
+		return parent:WaitForChild(name, timeout)
+	end)
+	if ok and child then
+		return child
+	end
+	return nil
+end
+
 local function searchByValue(root, targetText, exact, onProgress)
 	local found = {}
 	local count = 0
@@ -129,11 +141,12 @@ local function buildUI()
 			tabSearch:TextLabel("Mode: full game tree")
 		else
 			roots = {
-				player:FindFirstChild("leaderstats"),
-				player:FindFirstChild("PlayerGui"),
-				player:FindFirstChild("Backpack"),
+				waitForChild(player, "leaderstats", 3),
+				waitForChild(player, "PlayerGui", 3),
+				waitForChild(player, "Backpack", 3),
 				player,
 			}
+			tabSearch:TextLabel("Roots: leaderstats, PlayerGui, Backpack, player")
 		end
 
 		task.spawn(function()
