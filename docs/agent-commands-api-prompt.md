@@ -161,10 +161,10 @@ POST /commands/{id}/result
       "description": "Сместить персонажа по оси X",
       "params": {
         "value": {
-          "type": "number",
+          "type": "integer",
           "required": true,
-          "min": -10000,
-          "max": 10000,
+          "min": -7000,
+          "max": 7000,
           "description": "Смещение по оси X в студиях"
         }
       }
@@ -174,10 +174,10 @@ POST /commands/{id}/result
       "description": "Сместить персонажа по оси Y",
       "params": {
         "value": {
-          "type": "number",
+          "type": "integer",
           "required": true,
-          "min": -10000,
-          "max": 10000,
+          "min": -7000,
+          "max": 7000,
           "description": "Смещение по оси Y в студиях"
         }
       }
@@ -187,10 +187,10 @@ POST /commands/{id}/result
       "description": "Сместить персонажа по оси Z",
       "params": {
         "value": {
-          "type": "number",
+          "type": "integer",
           "required": true,
-          "min": -10000,
-          "max": 10000,
+          "min": -7000,
+          "max": 7000,
           "description": "Смещение по оси Z в студиях"
         }
       }
@@ -200,10 +200,10 @@ POST /commands/{id}/result
       "description": "Подождать N секунд",
       "params": {
         "duration": {
-          "type": "number",
+          "type": "integer",
           "required": true,
           "min": 0,
-          "max": 300,
+          "max": 86400,
           "description": "Длительность паузы в секундах"
         }
       }
