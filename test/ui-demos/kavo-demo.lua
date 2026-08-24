@@ -4,10 +4,17 @@
     Запусти в Roblox-executor'е, чтобы посмотреть визуал и возможности Kavo.
 ]]
 
-local Kavo = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
+print("[Kavo Demo] Loading library...")
+local ok, Kavo = pcall(function()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
+end)
+if not ok then
+    print("[Kavo Demo] Failed to load:", tostring(Kavo))
+    return
+end
+print("[Kavo Demo] Library loaded")
 
--- Встроенные темы Kavo: Dark, Light, Blood, Grape, Ocean, Midnight, Sentinel, Synapse, Serpent
--- Кастомные темы Gold и Ping для демонстрации
+-- Встроенные темы Kavo: DarkTheme, LightTheme, BloodTheme, GrapeTheme, Ocean, Midnight, Sentinel, Synapse, Serpent
 local customThemes = {
     Gold = {
         SchemeColor = Color3.fromRGB(255, 190, 40),
@@ -25,65 +32,75 @@ local customThemes = {
     }
 }
 
-local currentTheme = "Dark"
-local Window
+local themeMap = {
+    Dark = "DarkTheme",
+    Light = "LightTheme",
+    Blood = "BloodTheme",
+    Grape = "GrapeTheme",
+    Ocean = "Ocean",
+    Midnight = "Midnight",
+    Sentinel = "Sentinel",
+    Synapse = "Synapse",
+    Serpent = "Serpent",
+    Gold = customThemes.Gold,
+    Ping = customThemes.Ping
+}
 
-local function createWindow(theme)
-    if typeof(theme) == "string" then
-        Window = Kavo.CreateLib("Kavo Demo", theme)
-    else
-        Window = Kavo.CreateLib("Kavo Demo", theme)
+local function resolveTheme(option)
+    local theme = themeMap[option]
+    if theme then
+        return theme
     end
+    return "DarkTheme"
 end
 
-createWindow(currentTheme)
+local function buildUI(theme)
+    local Window = Kavo.CreateLib("Kavo Demo", theme)
 
-local tabMain = Window:NewTab("Main")
-local tabElements = Window:NewTab("Elements")
-local tabThemes = Window:NewTab("Themes")
+    local tabMain = Window:NewTab("Main")
+    local tabElements = Window:NewTab("Elements")
+    local tabThemes = Window:NewTab("Themes")
 
-local sectionInfo = tabMain:NewSection("Info")
-sectionInfo:NewLabel("Kavo Demo")
-sectionInfo:NewLabel("Демонстрация элементов Kavo.")
-sectionInfo:NewButton("Show Notification", "Click me", function()
-    -- Kavo не имеет встроенных уведомлений, выводим в консоль
-    print("[Kavo Demo] Button clicked")
-end)
+    local sectionInfo = tabMain:NewSection("Info")
+    sectionInfo:NewLabel("Kavo Demo")
+    sectionInfo:NewLabel("Демонстрация элементов Kavo.")
+    sectionInfo:NewButton("Show Notification", "Click me", function()
+        print("[Kavo Demo] Button clicked")
+    end)
 
-local sectionInputs = tabElements:NewSection("Inputs")
-sectionInputs:NewToggle("Enable Feature", "Toggle description", function(state)
-    print("Toggle:", state)
-end)
+    local sectionInputs = tabElements:NewSection("Inputs")
+    sectionInputs:NewToggle("Enable Feature", "Toggle description", function(state)
+        print("Toggle:", state)
+    end)
 
-sectionInputs:NewSlider("Speed", "Slider description", 0, 100, 50, function(value)
-    print("Slider:", value)
-end)
+    -- Kavo NewSlider(name, tip, max, min, callback). startVal берётся из глобальной переменной.
+    startVal = 50
+    sectionInputs:NewSlider("Speed", "Slider description", 100, 0, function(value)
+        print("Slider:", value)
+    end)
 
-sectionInputs:NewDropdown("Select Option", "Dropdown description", {"Option 1", "Option 2", "Option 3"}, function(option)
-    print("Dropdown:", option)
-end)
+    sectionInputs:NewDropdown("Select Option", "Dropdown description", {"Option 1", "Option 2", "Option 3"}, function(option)
+        print("Dropdown:", option)
+    end)
 
-sectionInputs:NewTextBox("Player Name", "Enter text", function(text)
-    print("TextBox:", text)
-end)
+    sectionInputs:NewTextBox("Player Name", "Enter text", function(text)
+        print("TextBox:", text)
+    end)
 
-sectionInputs:NewKeybind("Toggle Key", "Keybind description", Enum.KeyCode.Q, function()
-    print("Keybind pressed")
-end)
+    sectionInputs:NewKeybind("Toggle Key", "Keybind description", Enum.KeyCode.Q, function()
+        print("Keybind pressed")
+    end)
 
-sectionInputs:NewColorPicker("Pick Color", "Color picker description", Color3.fromRGB(255, 0, 0), function(color)
-    print("Color:", color)
-end)
+    sectionInputs:NewColorPicker("Pick Color", "Color picker description", Color3.fromRGB(255, 0, 0), function(color)
+        print("Color:", color)
+    end)
 
-local sectionThemes = tabThemes:NewSection("Theme Switcher")
-sectionThemes:NewDropdown("Select Theme", "Choose a theme", {"Dark", "Light", "Blood", "Grape", "Ocean", "Midnight", "Gold", "Ping"}, function(option)
-    if option == "Gold" then
-        createWindow(customThemes.Gold)
-    elseif option == "Ping" then
-        createWindow(customThemes.Ping)
-    else
-        createWindow(option)
-    end
-end)
+    local sectionThemes = tabThemes:NewSection("Theme Switcher")
+    sectionThemes:NewDropdown("Select Theme", "Choose a theme", {"Dark", "Light", "Blood", "Grape", "Ocean", "Midnight", "Sentinel", "Synapse", "Serpent", "Gold", "Ping"}, function(option)
+        buildUI(resolveTheme(option))
+    end)
+end
+
+buildUI("DarkTheme")
 
 print("[Kavo Demo] UI loaded")

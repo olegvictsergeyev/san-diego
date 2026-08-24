@@ -6,7 +6,7 @@
 
 print("[Mercury Simple] Loading library...")
 local ok, Mercury = pcall(function()
-    return loadstring(game:HttpGet("https://raw.githubusercontent.com/PlutonusDev/MercuryUI/master/MercuryUI.lua"))()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/deeeity/mercury-lib/master/src.lua"))()
 end)
 if not ok then
     print("[Mercury Simple] Failed to load:", tostring(Mercury))

@@ -15,18 +15,16 @@ Rayfield не поддерживает смену темы на лету. Тем
 
 Дополнительно:
 - `rayfield-simple.lua` — минимальный рабочий пример.
-- `rayfield-debug.lua` — пошаговое добавление элементов с `pcall`.
-- `rayfield-theme-test.lua` — проверка, какие темы работают при создании окна.
 
 ## Остальные библиотеки
 
 | Файл | Библиотека | Статус |
 |---|---|---|
-| `mercury-demo.lua` | Mercury | Требует отладки |
+| `mercury-demo.lua` | Mercury | URL и темы исправлены, требуется тест в executor'е |
 | `linoria-demo.lua` | Linoria | Работает |
-| `kavo-demo.lua` | Kavo | Требует отладки |
-| `material-demo.lua` | Material Lua | Требует отладки |
-| `orion-demo.lua` | Orion | Требует отладки |
+| `kavo-demo.lua` | Kavo | Переписан с учетом API, требуется тест в executor'е |
+| `material-demo.lua` | Material Lua | Переписан с учетом API, требуется тест в executor'е |
+| `orion-demo.lua` | Orion | Переписан с учетом API, требуется тест в executor'е |
 
 ## Запуск
 

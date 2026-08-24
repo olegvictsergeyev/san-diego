@@ -4,11 +4,22 @@
     Запусти в Roblox-executor'е, чтобы посмотреть визуал и возможности Material Lua.
 ]]
 
-local Material = loadstring(game:HttpGet("https://raw.githubusercontent.com/Kinlei/MaterialLua/master/Module.lua"))()
+print("[Material Lua Demo] Loading library...")
+local ok, Material = pcall(function()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Kinlei/MaterialLua/master/Module.lua"))()
+end)
+if not ok then
+    print("[Material Lua Demo] Failed to load:", tostring(Material))
+    return
+end
+print("[Material Lua Demo] Library loaded")
 
 local themes = {
     Dark = "Dark",
     Light = "Light",
+    Mocha = "Mocha",
+    Aqua = "Aqua",
+    Jester = "Jester",
     Gold = {
         MainFrame = Color3.fromRGB(45, 35, 15),
         Minimise = Color3.fromRGB(255, 200, 80),
@@ -17,10 +28,29 @@ local themes = {
         MaximiseAccent = Color3.fromRGB(230, 190, 90),
         NavBar = Color3.fromRGB(60, 48, 22),
         NavBarAccent = Color3.fromRGB(255, 200, 80),
+        NavBarInvert = Color3.fromRGB(30, 24, 10),
+        TitleBar = Color3.fromRGB(60, 48, 22),
+        TitleBarAccent = Color3.fromRGB(255, 245, 220),
+        Overlay = Color3.fromRGB(255, 200, 80),
+        Banner = Color3.fromRGB(60, 48, 22),
+        BannerAccent = Color3.fromRGB(255, 245, 220),
         Content = Color3.fromRGB(55, 44, 20),
-        Search = Color3.fromRGB(255, 240, 200),
-        Text = Color3.fromRGB(255, 245, 220),
-        Placeholder = Color3.fromRGB(200, 180, 140)
+        Button = Color3.fromRGB(255, 200, 80),
+        ButtonAccent = Color3.fromRGB(50, 40, 10),
+        ChipSet = Color3.fromRGB(255, 200, 80),
+        ChipSetAccent = Color3.fromRGB(50, 40, 10),
+        DataTable = Color3.fromRGB(255, 200, 80),
+        DataTableAccent = Color3.fromRGB(50, 40, 10),
+        Slider = Color3.fromRGB(55, 44, 20),
+        SliderAccent = Color3.fromRGB(255, 200, 80),
+        Toggle = Color3.fromRGB(255, 200, 80),
+        ToggleAccent = Color3.fromRGB(50, 40, 10),
+        Dropdown = Color3.fromRGB(55, 44, 20),
+        DropdownAccent = Color3.fromRGB(255, 200, 80),
+        ColorPicker = Color3.fromRGB(55, 44, 20),
+        ColorPickerAccent = Color3.fromRGB(255, 200, 80),
+        TextField = Color3.fromRGB(55, 44, 20),
+        TextFieldAccent = Color3.fromRGB(255, 200, 80)
     },
     Ping = {
         MainFrame = Color3.fromRGB(45, 15, 30),
@@ -30,23 +60,40 @@ local themes = {
         MaximiseAccent = Color3.fromRGB(230, 100, 160),
         NavBar = Color3.fromRGB(60, 20, 40),
         NavBarAccent = Color3.fromRGB(255, 100, 160),
+        NavBarInvert = Color3.fromRGB(30, 10, 20),
+        TitleBar = Color3.fromRGB(60, 20, 40),
+        TitleBarAccent = Color3.fromRGB(255, 240, 245),
+        Overlay = Color3.fromRGB(255, 100, 160),
+        Banner = Color3.fromRGB(60, 20, 40),
+        BannerAccent = Color3.fromRGB(255, 240, 245),
         Content = Color3.fromRGB(55, 20, 35),
-        Search = Color3.fromRGB(255, 220, 235),
-        Text = Color3.fromRGB(255, 240, 245),
-        Placeholder = Color3.fromRGB(200, 160, 180)
+        Button = Color3.fromRGB(255, 100, 160),
+        ButtonAccent = Color3.fromRGB(50, 10, 30),
+        ChipSet = Color3.fromRGB(255, 100, 160),
+        ChipSetAccent = Color3.fromRGB(50, 10, 30),
+        DataTable = Color3.fromRGB(255, 100, 160),
+        DataTableAccent = Color3.fromRGB(50, 10, 30),
+        Slider = Color3.fromRGB(55, 20, 35),
+        SliderAccent = Color3.fromRGB(255, 100, 160),
+        Toggle = Color3.fromRGB(255, 100, 160),
+        ToggleAccent = Color3.fromRGB(50, 10, 30),
+        Dropdown = Color3.fromRGB(55, 20, 35),
+        DropdownAccent = Color3.fromRGB(255, 100, 160),
+        ColorPicker = Color3.fromRGB(55, 20, 35),
+        ColorPickerAccent = Color3.fromRGB(255, 100, 160),
+        TextField = Color3.fromRGB(55, 20, 35),
+        TextFieldAccent = Color3.fromRGB(255, 100, 160)
     }
 }
 
-local function createUI(theme)
-    local options = {
+local function buildUI(theme)
+    local UI = Material.Load({
         Title = "Material Lua Demo",
         Style = 3,
         SizeX = 500,
         SizeY = 350,
         Theme = theme
-    }
-
-    local UI = Material.Load(options)
+    })
 
     local tabMain = UI.New({
         Title = "Main",
@@ -73,14 +120,12 @@ local function createUI(theme)
     tabMain.Label({ Text = "Material Lua Demo" })
     tabMain.Label({ Text = "Демонстрация элементов Material Lua." })
 
-    local toggleValue = false
     tabElements.Toggle({
         Text = "Enable Feature",
         Callback = function(state)
-            toggleValue = state
             print("Toggle:", state)
         end,
-        Enabled = toggleValue
+        Enabled = false
     })
 
     tabElements.Slider({
@@ -108,15 +153,25 @@ local function createUI(theme)
         end
     })
 
+    tabElements.ColorPicker({
+        Text = "Pick Color",
+        Default = Color3.fromRGB(255, 0, 0),
+        Callback = function(color)
+            print("Color:", color)
+        end
+    })
+
     tabThemes.Dropdown({
         Text = "Select Theme",
         Callback = function(option)
-            print("[Material Lua Demo] Theme changed to", option, "- reload UI to apply")
+            if themes[option] then
+                buildUI(themes[option])
+            end
         end,
-        Options = {"Dark", "Light", "Gold", "Ping"}
+        Options = {"Dark", "Light", "Mocha", "Aqua", "Jester", "Gold", "Ping"}
     })
 end
 
-createUI(themes.Dark)
+buildUI(themes.Dark)
 
 print("[Material Lua Demo] UI loaded")

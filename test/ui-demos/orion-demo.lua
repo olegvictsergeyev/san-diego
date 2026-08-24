@@ -2,110 +2,56 @@
     Orion UI Demo
     =============
     Запусти в Roblox-executor'е, чтобы посмотреть визуал и возможности Orion.
+
+    Особенности:
+    - Библиотека не имеет встроенной смены темы (цвета зашиты в коде).
+    - API отличается от MakeWindow/MakeTab: используется CreateOrion -> CreateSection.
 ]]
 
-local OrionLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/OrionLibrary/Orion/main/source.lua"))()
+print("[Orion Demo] Loading library...")
+local ok, Orion = pcall(function()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/OrionLibrary/Orion/main/source.lua"))()
+end)
+if not ok then
+    print("[Orion Demo] Failed to load:", tostring(Orion))
+    return
+end
+print("[Orion Demo] Library loaded")
 
-local Window = OrionLib:MakeWindow({
-    Name = "Orion Demo",
-    HidePremium = false,
-    SaveConfig = true,
-    ConfigFolder = "OrionDemo"
-})
+local Window = Orion:CreateOrion("Orion Demo")
 
-local tabMain = Window:MakeTab({
-    Name = "Main",
-    Icon = "rbxassetid://4483362458",
-    PremiumOnly = false
-})
+local tabMain = Window:CreateSection("Main")
+local tabElements = Window:CreateSection("Elements")
+local tabThemes = Window:CreateSection("Themes")
 
-local tabElements = Window:MakeTab({
-    Name = "Elements",
-    Icon = "rbxassetid://4483362458",
-    PremiumOnly = false
-})
+tabMain:TextLabel("Orion Demo")
+tabMain:TextLabel("Демонстрация элементов Orion.")
 
-local tabThemes = Window:MakeTab({
-    Name = "Themes",
-    Icon = "rbxassetid://4483362458",
-    PremiumOnly = false
-})
+tabMain:TextButton("Show Notification", "Click to print", function()
+    print("[Orion Demo] Button clicked")
+end)
 
-tabMain:AddSection({ Name = "Info" })
-tabMain:AddLabel("Orion Demo")
-tabMain:AddLabel("Демонстрация элементов Orion.")
+tabElements:Toggle("Enable Feature", function(state)
+    print("Toggle:", state)
+end)
 
-tabMain:AddButton({
-    Name = "Show Notification",
-    Callback = function()
-        OrionLib:MakeNotification({
-            Name = "Hello!",
-            Content = "This is an Orion notification.",
-            Image = "rbxassetid://4483362458",
-            Time = 4
-        })
-    end
-})
+tabElements:Slider("Speed", 0, 100, function(value)
+    print("Slider:", value)
+end)
 
-tabElements:AddSection({ Name = "Inputs" })
+tabElements:Dropdown("Select Option", {"Option 1", "Option 2", "Option 3"}, function(option)
+    print("Dropdown:", option)
+end)
 
-tabElements:AddToggle({
-    Name = "Enable Feature",
-    Default = false,
-    Callback = function(value)
-        print("Toggle:", value)
-    end
-})
+tabElements:TextBox("Player Name", "Enter text...", function(text)
+    print("TextBox:", text)
+end)
 
-tabElements:AddSlider({
-    Name = "Speed",
-    Min = 0,
-    Max = 100,
-    Default = 50,
-    Increment = 1,
-    ValueName = "units",
-    Callback = function(value)
-        print("Slider:", value)
-    end
-})
+tabElements:KeyBind("Toggle Key", Enum.KeyCode.Q, function()
+    print("Keybind pressed")
+end)
 
-tabElements:AddDropdown({
-    Name = "Select Option",
-    Default = "Option 1",
-    Options = {"Option 1", "Option 2", "Option 3"},
-    Callback = function(option)
-        print("Dropdown:", option)
-    end
-})
-
-tabElements:AddTextbox({
-    Name = "Player Name",
-    Default = "",
-    TextDisappear = false,
-    Callback = function(text)
-        print("Textbox:", text)
-    end
-})
-
-tabElements:AddBind({
-    Name = "Toggle Key",
-    Default = Enum.KeyCode.Q,
-    Hold = false,
-    Callback = function()
-        print("Keybind pressed")
-    end
-})
-
-tabElements:AddColorpicker({
-    Name = "Pick Color",
-    Default = Color3.fromRGB(255, 0, 0),
-    Callback = function(color)
-        print("Color:", color)
-    end
-})
-
-tabThemes:AddSection({ Name = "Theme Info" })
-tabThemes:AddLabel("Orion имеет фиксированную тему по умолчанию.")
-tabThemes:AddLabel("Кастомные темы Dark/Light/Gold/Ping требуют модификации библиотеки.")
+tabThemes:TextLabel("Orion имеет фиксированную тему по умолчанию.")
+tabThemes:TextLabel("Кастомные темы Dark/Light/Gold/Ping требуют модификации библиотеки.")
 
 print("[Orion Demo] UI loaded")
