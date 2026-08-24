@@ -76,7 +76,7 @@ local themes = {
     }
 }
 
-local function buildUI(theme)
+local function buildUI(Material, theme)
     local UI = Material.Load({
         Title = "Material Lua Demo",
         Style = 3,
@@ -152,7 +152,7 @@ local function buildUI(theme)
         Text = "Select Theme",
         Callback = function(option)
             if themes[option] then
-                buildUI(themes[option])
+                buildUI(Material, themes[option])
             end
         end,
         Options = {"Dark", "Light", "Mocha", "Aqua", "Jester", "Gold", "Ping"}
@@ -170,7 +170,7 @@ local function runDemo()
     end
     print("[Material Lua Demo] Library loaded")
 
-    buildUI(themes.Dark)
+    buildUI(Material, themes.Dark)
     print("[Material Lua Demo] UI loaded")
 end
 
