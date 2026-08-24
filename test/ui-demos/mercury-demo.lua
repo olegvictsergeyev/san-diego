@@ -34,8 +34,8 @@ local function runDemo()
     })
     print("[Mercury Demo] Themes tab created")
 
-    tabMain:label("Mercury Demo")
-    tabMain:label("Это демонстрационный скрипт для оценки визуала и функциональности Mercury.")
+    tabMain:label({ Text = "Mercury Demo" })
+    tabMain:label({ Text = "Это демонстрационный скрипт для оценки визуала и функциональности Mercury." })
 
     tabMain:button({
         Name = "Show Notification",
