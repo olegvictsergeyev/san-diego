@@ -8,7 +8,7 @@ local function runDemo()
     local Mercury = loadstring(game:HttpGet("https://raw.githubusercontent.com/deeeity/mercury-lib/master/src.lua"))()
     print("[Mercury Demo] Library loaded")
 
-    local gui = Mercury:Create({
+    local gui = Mercury:create({
         Name = "Mercury Demo",
         Size = UDim2.fromOffset(600, 400),
         Theme = Mercury.Themes.Dark,
@@ -16,31 +16,31 @@ local function runDemo()
     })
     print("[Mercury Demo] Window created")
 
-    local tabMain = gui:Tab({
+    local tabMain = gui:tab({
         Name = "Main",
         Icon = "rbxassetid://8569322835"
     })
     print("[Mercury Demo] Main tab created")
 
-    local tabElements = gui:Tab({
+    local tabElements = gui:tab({
         Name = "Elements",
         Icon = "rbxassetid://4483362458"
     })
     print("[Mercury Demo] Elements tab created")
 
-    local tabThemes = gui:Tab({
+    local tabThemes = gui:tab({
         Name = "Themes",
         Icon = "rbxassetid://8559790237"
     })
     print("[Mercury Demo] Themes tab created")
 
-    tabMain:Label("Mercury Demo")
-    tabMain:Label("Это демонстрационный скрипт для оценки визуала и функциональности Mercury.")
+    tabMain:label("Mercury Demo")
+    tabMain:label("Это демонстрационный скрипт для оценки визуала и функциональности Mercury.")
 
-    tabMain:Button({
+    tabMain:button({
         Name = "Show Notification",
         Callback = function()
-            gui:Notification({
+            gui:notification({
                 Title = "Hello!",
                 Text = "This is a Mercury notification.",
                 Duration = 3
@@ -48,7 +48,7 @@ local function runDemo()
         end
     })
 
-    tabElements:Toggle({
+    tabElements:toggle({
         Name = "Enable Feature",
         StartingState = false,
         Callback = function(state)
@@ -56,7 +56,7 @@ local function runDemo()
         end
     })
 
-    tabElements:Slider({
+    tabElements:slider({
         Name = "Speed",
         Min = 0,
         Max = 100,
@@ -66,7 +66,7 @@ local function runDemo()
         end
     })
 
-    tabElements:Dropdown({
+    tabElements:dropdown({
         Name = "Select Option",
         StartingText = "Choose...",
         Items = {"Option 1", "Option 2", "Option 3"},
@@ -75,14 +75,14 @@ local function runDemo()
         end
     })
 
-    tabElements:Textbox({
+    tabElements:textbox({
         Name = "Player Name",
         Callback = function(text)
             print("Textbox:", text)
         end
     })
 
-    tabElements:Keybind({
+    tabElements:keybind({
         Name = "Toggle Key",
         Keybind = Enum.KeyCode.Delete,
         Callback = function()
@@ -90,7 +90,7 @@ local function runDemo()
         end
     })
 
-    tabElements:ColorPicker({
+    tabElements:colorpicker({
         Name = "Pick Color",
         Style = Mercury.ColorPickerStyles.Legacy,
         Callback = function(color)
@@ -98,10 +98,10 @@ local function runDemo()
         end
     })
 
-    tabMain:Button({
+    tabMain:button({
         Name = "Show Prompt",
         Callback = function()
-            gui:Prompt({
+            gui:prompt({
                 Title = "Confirm",
                 Text = "Are you sure you want to continue?",
                 Followup = false,
@@ -149,7 +149,7 @@ local function runDemo()
     Mercury.Themes.Gold = goldTheme
     Mercury.Themes.Ping = pingTheme
 
-    tabThemes:Dropdown({
+    tabThemes:dropdown({
         Name = "Select Theme",
         StartingText = "Dark",
         Items = {"Dark", "Light", "Gold", "Ping"},
