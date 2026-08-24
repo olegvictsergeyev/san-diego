@@ -120,25 +120,25 @@ local function buildUI()
 		searchEverywhere = state
 	end)
 
-		tabSearch:TextButton("Search", "Start smooth search", function()
+	tabSearch:TextButton("Search", "Start smooth search", function()
 		local player = Players.LocalPlayer
 		if not player then
-			tabSearch:TextLabel("LocalPlayer not found")
+			print("[ValueFinder] LocalPlayer not found")
 			return
 		end
 
 		local targetText = inputValue
 		if targetText == "" then
-			tabSearch:TextLabel("Enter a value first")
+			print("[ValueFinder] Enter a value first")
 			return
 		end
 
-		tabSearch:TextLabel("Searching for: " .. targetText)
+		print("[ValueFinder] Searching for: " .. targetText)
 
 		local roots
 		if searchEverywhere then
 			roots = { game }
-			tabSearch:TextLabel("Mode: full game tree")
+			print("[ValueFinder] Mode: full game tree")
 		else
 			roots = {
 				waitForChild(player, "leaderstats", 3),
@@ -146,7 +146,7 @@ local function buildUI()
 				waitForChild(player, "Backpack", 3),
 				player,
 			}
-			tabSearch:TextLabel("Roots: leaderstats, PlayerGui, Backpack, player")
+			print("[ValueFinder] Roots: leaderstats, PlayerGui, Backpack, player")
 		end
 
 		task.spawn(function()
@@ -156,7 +156,7 @@ local function buildUI()
 			for _, root in ipairs(roots) do
 				if root then
 					local found, checked = searchByValue(root, targetText, exactMatch, function(count)
-						tabSearch:TextLabel("Checked: " .. tostring(count))
+						print("[ValueFinder] Checked: " .. tostring(count))
 					end)
 					for _, item in ipairs(found) do
 						table.insert(allFound, item)
@@ -165,16 +165,16 @@ local function buildUI()
 				end
 			end
 
-			tabSearch:TextLabel("Total checked: " .. tostring(totalChecked) .. ", found: " .. tostring(#allFound))
+			print("[ValueFinder] Total checked: " .. tostring(totalChecked) .. ", found: " .. tostring(#allFound))
 
 			if #allFound == 0 then
-				tabSearch:TextLabel("Nothing found")
+				print("[ValueFinder] Nothing found")
 				return
 			end
 
 			local maxResults = 20
 			if #allFound > maxResults then
-				tabSearch:TextLabel("Showing first " .. tostring(maxResults) .. " results")
+				print("[ValueFinder] Showing first " .. tostring(maxResults) .. " results")
 			end
 
 			for i = 1, math.min(#allFound, maxResults) do
@@ -184,10 +184,10 @@ local function buildUI()
 				pcall(function()
 					currentValue = tostring(item.Value)
 				end)
-				tabSearch:TextLabel(item.Name .. " = " .. currentValue .. " (" .. item.ClassName .. ")")
-				tabSearch:TextButton("Copy path", path, function()
+				print("[ValueFinder] Result: " .. item.Name .. " = " .. currentValue .. " (" .. item.ClassName .. ") at " .. path)
+				tabSearch:TextButton("Copy: " .. item.Name, path, function()
 					copyToClipboard(path)
-					tabSearch:TextLabel("Copied: " .. path)
+					print("[ValueFinder] Copied: " .. path)
 				end)
 			end
 		end)
