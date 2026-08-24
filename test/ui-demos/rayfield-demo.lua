@@ -5,7 +5,18 @@
     Внимание: Rayfield не поддерживает смену темы на лету. Тема задаётся при создании окна.
 ]]
 
-local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+print("[Rayfield Demo] Script started")
+
+local ok, err = pcall(function()
+    return loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+end)
+if not ok then
+    print("[Rayfield Demo] Failed to load library:", tostring(err))
+    return
+end
+local Rayfield = err
+print("[Rayfield Demo] Library loaded")
+
 local Players = game:GetService("Players")
 
 local themes = {
@@ -80,6 +91,7 @@ local themes = {
 }
 
 local function destroyOldUI()
+    print("[Rayfield Demo] Destroying old UI...")
     local coreGui = game:GetService("CoreGui")
     for _, child in ipairs(coreGui:GetChildren()) do
         if child.Name == "Rayfield" or child.Name == "Rayfield-Old" then
@@ -96,6 +108,7 @@ local function destroyOldUI()
 end
 
 local function buildUI(themeName)
+    print("[Rayfield Demo] Building UI with theme:", themeName)
     destroyOldUI()
 
     local selectedTheme = themes[themeName] or themes.Dark
@@ -112,10 +125,12 @@ local function buildUI(themeName)
         KeySystem = false,
         Theme = selectedTheme
     })
+    print("[Rayfield Demo] Window created")
 
     local tabMain = window:CreateTab("Main", 4483362458)
     local tabElements = window:CreateTab("Elements", 4483362458)
     local tabThemes = window:CreateTab("Themes", 4483362458)
+    print("[Rayfield Demo] Tabs created")
 
     tabMain:CreateParagraph({
         Title = "Rayfield Demo",
@@ -198,22 +213,36 @@ local function buildUI(themeName)
     tabElements:CreateLabel("This is a label element")
 
     tabThemes:CreateLabel("Rayfield не поддерживает смену темы на лету.")
-    tabThemes:CreateLabel("Выберите тему — интерфейс пересоздастся.")
+    tabThemes:CreateLabel("Выберите тему и нажмите Apply Theme.")
 
-    local themeDropdown
-    themeDropdown = tabThemes:CreateDropdown({
+    local selectedTheme = themeName
+    tabThemes:CreateDropdown({
         Name = "Select Theme",
         Options = {"Dark", "Light", "Gold", "Ping"},
         CurrentOption = themeName,
         Callback = function(option)
-            local selected = typeof(option) == "table" and option[1] or tostring(option)
-            if selected ~= themeName then
-                buildUI(selected)
-            end
+            selectedTheme = typeof(option) == "table" and option[1] or tostring(option)
+            print("[Rayfield Demo] Selected theme:", selectedTheme)
         end
     })
+
+    tabThemes:CreateButton({
+        Name = "Apply Theme",
+        Callback = function()
+            print("[Rayfield Demo] Applying theme:", selectedTheme)
+            buildUI(selectedTheme)
+        end
+    })
+
+    print("[Rayfield Demo] UI built successfully")
 end
 
-buildUI("Dark")
+local buildOk, buildErr = pcall(function()
+    buildUI("Dark")
+end)
 
-print("[Rayfield Demo] UI loaded")
+if not buildOk then
+    print("[Rayfield Demo] Build UI failed:", tostring(buildErr))
+else
+    print("[Rayfield Demo] Done")
+end
