@@ -1,0 +1,99 @@
+# San Diego Agent
+
+Агент для Roblox-игры **San Diego**. Отправляет статусы игровых аккаунтов на сервис и выполняет команды от сервера.
+
+## Структура
+
+```
+san-diego/
+├── final/
+│   └── agent.lua           # готовый скрипт для запуска в executor'е
+├── modules/
+│   ├── http_client.lua     # HTTP-клиент с fallback'ами для разных executor'ов
+│   ├── state_collector.lua # сбор состояния персонажа
+│   ├── command_engine.lua  # движок команд + отмена
+│   └── agent.lua           # основной цикл агента
+├── test/
+│   └── agent-standalone.lua # локальная отладка без raw-URL, всё в одном файле
+├── docs/
+│   └── agent-commands-api-prompt.md  # промт для другого агента (backend API)
+└── README.md
+```
+
+## Быстрый старт
+
+1. Создайте игру и tracked-поля:
+   ```bash
+   POST /games { "name": "San Diego", "slug": "san-diego" }
+   POST /games/{id}/fields { "name": "location", "field_type": "string" }
+   POST /games/{id}/fields { "name": "team", "field_type": "string" }
+   ```
+
+   Формат `POST /game/update`:
+   ```json
+   {
+     "nickname": "PlayerOne",
+     "game_slug": "san-diego",
+     "server_id": "...",
+     "place_id": "...",
+     "status": "online",
+     "balance": 1250,
+     "custom_data": {
+       "location": "123.5, 10.0, -45.2",
+       "team": "Civilian"
+     }
+   }
+   ```
+
+2. Замените в `final/agent.lua` URL модулей на свои raw-ссылки с GitHub:
+   ```lua
+   moduleUrls = {
+       http_client = "https://raw.githubusercontent.com/YOUR_USER/san-diego/main/modules/http_client.lua",
+       ...
+   }
+   ```
+
+3. При необходимости измените `balancePath` — путь к балансу в `LocalPlayer`.
+
+4. Запустите `final/agent.lua` в Roblox-executor'е.
+
+5. Для остановки выполните в консоли:
+   ```lua
+   getgenv().StopSanDiegoAgent = true
+   ```
+
+## Локальное тестирование
+
+Для отладки без публикации в git и без реального сервера используйте `test/agent-standalone.lua`:
+
+- Все модули встроены в один файл — не требует `readfile`/`require`.
+- `useMockHttp = true` — HTTP-запросы печатаются в консоль, команды берутся из встроенной очереди.
+- В очередь можно добавлять свои команды через `http:enqueueCommand("move_x", { value = 10 })`.
+
+## Команды
+
+Агент поддерживает:
+- `get_commands` — вернуть список доступных команд и их параметры.
+- `move_x`, `move_y`, `move_z` — сместить персонажа по оси.
+- `pause` — подождать N секунд.
+- `cancel` — отменить текущую команду.
+
+## API для команд
+
+См. `docs/agent-commands-api-prompt.md` — промт для другого агента, который создаст backend-часть под команды.
+
+## Конфигурация
+
+Все настройки в начале `final/agent.lua`:
+- `baseUrl` — URL существующего сервиса.
+- `gameSlug` — идентификатор игры (`san-diego`).
+- `statusInterval` — интервал отправки статуса в секундах (рекомендуется 5–10).
+- `balancePath` — путь к балансу, например `"leaderstats.Cash"`.
+- `useRemoteModules` — `true` для загрузки модулей по raw-URL, `false` для локального `require`.
+
+## Правила работы с репозиторием
+
+- Все изменения ведутся в одной ветке `main`.
+- `final/` содержит только одобренные скрипты.
+- `test/` — для черновиков и экспериментов (создайте при необходимости).
+- Модули из `modules/` публикуются в git и подключаются через raw-URL.
