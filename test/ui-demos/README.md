@@ -4,16 +4,29 @@
 
 Запусти любой файл в Roblox-executor'е, чтобы посмотреть визуал и доступные элементы.
 
-## Библиотеки
+## Rayfield
 
-| Файл | Библиотека | Темы |
+Rayfield не поддерживает смену темы на лету. Тема задаётся один раз при создании окна. Поэтому для каждой темы отдельный файл:
+
+- `rayfield-demo.lua` — стандартная тема (Default) со всеми элементами.
+- `rayfield-light.lua` — встроенная светлая тема.
+- `rayfield-gold.lua` — кастомная золотая тема.
+- `rayfield-ping.lua` — кастомная розовая тема.
+
+Дополнительно:
+- `rayfield-simple.lua` — минимальный рабочий пример.
+- `rayfield-debug.lua` — пошаговое добавление элементов с `pcall`.
+- `rayfield-theme-test.lua` — проверка, какие темы работают при создании окна.
+
+## Остальные библиотеки
+
+| Файл | Библиотека | Статус |
 |---|---|---|
-| `rayfield-demo.lua` | Rayfield | Default, Ocean, Light, Amethyst, Green, Bloom, DarkBlue, Serenity + Gold, Ping (custom) |
-| `mercury-demo.lua` | Mercury | Dark, Light + Gold, Ping (custom) |
-| `linoria-demo.lua` | Linoria | Dark, Light, Gold, Ping (custom) |
-| `kavo-demo.lua` | Kavo | Dark, Light, Blood, Grape, Ocean, Midnight, Sentinel, Synapse, Serpent + Gold, Ping (custom) |
-| `material-demo.lua` | Material Lua | Dark, Light, Mocha, Aqua, Jester + Gold, Ping (custom) |
-| `orion-demo.lua` | Orion | Стандартная тема (фиксированная) |
+| `mercury-demo.lua` | Mercury | Требует отладки |
+| `linoria-demo.lua` | Linoria | Работает |
+| `kavo-demo.lua` | Kavo | Требует отладки |
+| `material-demo.lua` | Material Lua | Требует отладки |
+| `orion-demo.lua` | Orion | Требует отладки |
 
 ## Запуск
 
