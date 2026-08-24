@@ -177,7 +177,6 @@ function StateCollector:getBalance()
 			if value then
 				self._cachedBalancePath = rootName .. "." .. value.Name
 				local raw = value:GetAttribute("RawValue")
-				print("[StateCollector] found balance at", self._cachedBalancePath, "RawValue =", tostring(raw), "Value =", tostring(value.Value))
 				if typeof(raw) == "number" then
 					return raw
 				end
@@ -187,7 +186,6 @@ function StateCollector:getBalance()
 		end
 	end
 
-	print("[StateCollector] no balance found")
 	return 0
 end
 
