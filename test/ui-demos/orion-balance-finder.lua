@@ -1,19 +1,18 @@
 --[[
-    Orion Balance / Value Finder
-    ==============================
-    Плавно ищет в дереве игры Value-объект с заданным именем.
-    Полезно для определения пути к балансу.
+    Orion Value Finder
+    ==================
+    Плавно ищет в дереве игры Value-объекты по их значению.
+    Можно искать число (например, свой текущий баланс) или текстовое вхождение.
 ]]
 
 local Players = game:GetService("Players")
-local HttpService = game:GetService("HttpService")
 
 local function loadOrion()
 	local ok, Orion = pcall(function()
 		return loadstring(game:HttpGet("https://raw.githubusercontent.com/OrionLibrary/Orion/main/source.lua"))()
 	end)
 	if not ok then
-		warn("[BalanceFinder] Failed to load Orion:", tostring(Orion))
+		warn("[ValueFinder] Failed to load Orion:", tostring(Orion))
 		return nil
 	end
 	return Orion
@@ -25,7 +24,28 @@ local function copyToClipboard(text)
 	end)
 end
 
-local function searchInstance(root, targetName, onProgress)
+local function matchesValue(value, targetText, exact)
+	local valueText = tostring(value)
+	local targetNum = tonumber(targetText)
+	local valueNum = typeof(value) == "number" and value or tonumber(valueText)
+
+	if targetNum and valueNum then
+		if exact then
+			return valueNum == targetNum
+		else
+			-- Для чисел "вхождение" не имеет смысла, поэтому сравниваем на равенство.
+			return valueNum == targetNum
+		end
+	end
+
+	if exact then
+		return valueText == targetText
+	end
+
+	return string.find(valueText, targetText, 1, true) ~= nil
+end
+
+local function searchByValue(root, targetText, exact, onProgress)
 	local found = {}
 	local count = 0
 	local stack = { root }
@@ -34,8 +54,13 @@ local function searchInstance(root, targetName, onProgress)
 		local current = table.remove(stack)
 		local children = current:GetChildren()
 		for _, child in ipairs(children) do
-			if child.Name == targetName then
-				table.insert(found, child)
+			if child:IsA("ValueBase") then
+				local ok, value = pcall(function()
+					return child.Value
+				end)
+				if ok and matchesValue(value, targetText, exact) then
+					table.insert(found, child)
+				end
 			end
 			table.insert(stack, child)
 			count = count + 1
@@ -51,25 +76,23 @@ local function searchInstance(root, targetName, onProgress)
 	return found, count
 end
 
-local function getValueText(instance)
-	if instance:IsA("ValueBase") then
-		return tostring(instance.Value)
-	end
-	return "<not a ValueBase>"
-end
-
 local function buildUI()
 	local Orion = loadOrion()
 	if not Orion then return end
 
-	local window = Orion:CreateOrion("Balance Finder")
+	local window = Orion:CreateOrion("Value Finder")
 	local tabSearch = window:CreateSection("Search")
 
-	tabSearch:TextLabel("Enter value name (e.g. Cash, Money, Balance)")
+	tabSearch:TextLabel("Enter value to find (number or text)")
 
-	local inputName = ""
-	tabSearch:TextBox("Value name", "Cash", function(text)
-		inputName = text
+	local inputValue = ""
+	tabSearch:TextBox("Value to find", "100", function(text)
+		inputValue = text
+	end)
+
+	local exactMatch = false
+	tabSearch:Toggle("Exact match", function(state)
+		exactMatch = state
 	end)
 
 	local searchEverywhere = false
@@ -84,13 +107,13 @@ local function buildUI()
 			return
 		end
 
-		local targetName = inputName
-		if targetName == "" then
-			tabSearch:TextLabel("Enter a name first")
+		local targetText = inputValue
+		if targetText == "" then
+			tabSearch:TextLabel("Enter a value first")
 			return
 		end
 
-		tabSearch:TextLabel("Searching for: " .. targetName)
+		tabSearch:TextLabel("Searching for: " .. targetText)
 
 		local roots
 		if searchEverywhere then
@@ -111,7 +134,7 @@ local function buildUI()
 
 			for _, root in ipairs(roots) do
 				if root then
-					local found, checked = searchInstance(root, targetName, function(count)
+					local found, checked = searchByValue(root, targetText, exactMatch, function(count)
 						tabSearch:TextLabel("Checked: " .. tostring(count))
 					end)
 					for _, item in ipairs(found) do
@@ -128,10 +151,19 @@ local function buildUI()
 				return
 			end
 
-			for _, item in ipairs(allFound) do
+			local maxResults = 20
+			if #allFound > maxResults then
+				tabSearch:TextLabel("Showing first " .. tostring(maxResults) .. " results")
+			end
+
+			for i = 1, math.min(#allFound, maxResults) do
+				local item = allFound[i]
 				local path = item:GetFullName()
-				local valueText = getValueText(item)
-				tabSearch:TextLabel(path .. " = " .. valueText)
+				local currentValue = "?"
+				pcall(function()
+					currentValue = tostring(item.Value)
+				end)
+				tabSearch:TextLabel(item.Name .. " = " .. currentValue .. " (" .. item.ClassName .. ")")
 				tabSearch:TextButton("Copy path", path, function()
 					copyToClipboard(path)
 					tabSearch:TextLabel("Copied: " .. path)
@@ -140,13 +172,13 @@ local function buildUI()
 		end)
 	end)
 
-	print("[BalanceFinder] UI built")
+	print("[ValueFinder] UI built")
 end
 
 local ok, err = xpcall(buildUI, function(msg)
 	return debug.traceback(tostring(msg), 2)
 end)
 if not ok then
-	print("[BalanceFinder] ERROR:\n" .. tostring(err))
-	warn("[BalanceFinder] ERROR:\n" .. tostring(err))
+	print("[ValueFinder] ERROR:\n" .. tostring(err))
+	warn("[ValueFinder] ERROR:\n" .. tostring(err))
 end
