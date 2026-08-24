@@ -98,9 +98,26 @@ local function add(name, fn)
     end
 end
 
+local function destroyOldUI()
+    local coreGui = game:GetService("CoreGui")
+    for _, child in ipairs(coreGui:GetChildren()) do
+        if child.Name == "Rayfield" or child.Name == "Rayfield-Old" then
+            pcall(function() child:Destroy() end)
+        end
+    end
+    if gethui then
+        for _, child in ipairs(gethui():GetChildren()) do
+            if child.Name == "Rayfield" or child.Name == "Rayfield-Old" then
+                pcall(function() child:Destroy() end)
+            end
+        end
+    end
+end
+
 local function buildUI(themeName)
     currentTheme = themeName
     print("[Rayfield Demo] Building UI with theme:", themeName)
+    destroyOldUI()
 
     add("CreateWindow", function()
         window = Rayfield:CreateWindow({
