@@ -6,6 +6,8 @@
     Запускается из final/agent.lua.
 ]]
 
+local Players = game:GetService("Players")
+
 local CONFIG = {
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -66,6 +68,7 @@ local CommandEngine = loadModule("command_engine")
 local Agent = loadModule("agent")
 
 local currentAgent = nil
+local stateReader = StateCollector.new(CONFIG.balancePath)
 
 local function makeAgent()
     local http = HttpClient.new(CONFIG.baseUrl)
@@ -90,9 +93,34 @@ local function stopAgent()
     end
 end
 
-local function sendStatusNow()
-    if currentAgent and currentAgent._sendStatus then
-        currentAgent:_sendStatus()
+local function getPosition()
+    local player = Players.LocalPlayer
+    if not player then return Vector3.new(0, 0, 0) end
+    local character = player.Character
+    if not character then return Vector3.new(0, 0, 0) end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if hrp and hrp:IsA("BasePart") then
+        return hrp.Position
+    end
+    return Vector3.new(0, 0, 0)
+end
+
+local function getCoord(axis)
+    local pos = getPosition()
+    if axis == "X" then return pos.X end
+    if axis == "Y" then return pos.Y end
+    if axis == "Z" then return pos.Z end
+    return 0
+end
+
+local function copyToClipboard(text)
+    local ok = pcall(function()
+        setclipboard(tostring(text))
+    end)
+    if ok then
+        print("[SanDiegoAgent][UI] Скопировано:", text)
+    else
+        print("[SanDiegoAgent][UI] Clipboard недоступен. Значение:", text)
     end
 end
 
@@ -107,6 +135,42 @@ local function loadOrion()
     return Orion
 end
 
+local function findMainPage(gui)
+    for _, desc in ipairs(gui:GetDescendants()) do
+        if desc.Name == "newPageГлавное" then
+            return desc
+        end
+    end
+    return nil
+end
+
+local function updateInfoLabels()
+    local gui = game.CoreGui:FindFirstChild("San Diego Agent")
+    if not gui then return end
+    local page = findMainPage(gui)
+    if not page then return end
+
+    local pos = getPosition()
+    local bal = stateReader:getBalance()
+
+    for _, child in ipairs(page:GetChildren()) do
+        if child.Name == "labelFrame" then
+            local txt = child:FindFirstChild("txtLabel")
+            if txt and txt:IsA("TextLabel") then
+                if txt.Text:sub(1, 2) == "X:" then
+                    txt.Text = string.format("X: %.2f", pos.X)
+                elseif txt.Text:sub(1, 2) == "Y:" then
+                    txt.Text = string.format("Y: %.2f", pos.Y)
+                elseif txt.Text:sub(1, 2) == "Z:" then
+                    txt.Text = string.format("Z: %.2f", pos.Z)
+                elseif txt.Text:sub(1, 8) == "Balance:" then
+                    txt.Text = "Balance: " .. tostring(bal)
+                end
+            end
+        end
+    end
+end
+
 local function buildUI()
     local Orion = loadOrion()
     if not Orion then
@@ -114,27 +178,40 @@ local function buildUI()
     end
 
     local window = Orion:CreateOrion("San Diego Agent")
+    local tabMain = window:CreateSection("Главное")
 
-    local tabMain = window:CreateSection("Main")
+    local pos = getPosition()
+    local bal = stateReader:getBalance()
 
-    tabMain:TextLabel("baseUrl: " .. tostring(CONFIG.baseUrl))
-    tabMain:TextLabel("gameSlug: " .. tostring(CONFIG.gameSlug))
-    tabMain:TextLabel("balancePath: " .. tostring(CONFIG.balancePath))
-    tabMain:TextLabel("statusInterval: " .. tostring(CONFIG.statusInterval))
-
-    tabMain:TextButton("Start Agent", "Launch the agent", function()
-        startAgent()
+    tabMain:TextLabel(string.format("X: %.2f", pos.X))
+    tabMain:TextButton("Copy X", "Copy X coordinate", function()
+        copyToClipboard(string.format("%.2f", getCoord("X")))
     end)
 
-    tabMain:TextButton("Stop Agent", "Stop the agent", function()
-        stopAgent()
+    tabMain:TextLabel(string.format("Y: %.2f", pos.Y))
+    tabMain:TextButton("Copy Y", "Copy Y coordinate", function()
+        copyToClipboard(string.format("%.2f", getCoord("Y")))
     end)
 
-    tabMain:TextButton("Send Status Now", "Send status manually", function()
-        sendStatusNow()
+    tabMain:TextLabel(string.format("Z: %.2f", pos.Z))
+    tabMain:TextButton("Copy Z", "Copy Z coordinate", function()
+        copyToClipboard(string.format("%.2f", getCoord("Z")))
     end)
 
-    print("[SanDiegoAgent][UI] Panel built")
+    tabMain:TextLabel("Balance: " .. tostring(bal))
+
+    -- Автозапуск агента
+    startAgent()
+
+    -- Обновление координат и баланса в UI
+    task.spawn(function()
+        while true do
+            updateInfoLabels()
+            task.wait(0.5)
+        end
+    end)
+
+    print("[SanDiegoAgent][UI] Panel built and agent started")
 end
 
 local UIPanel = {}
