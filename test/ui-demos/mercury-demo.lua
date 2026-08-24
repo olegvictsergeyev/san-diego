@@ -168,8 +168,8 @@ local function runDemo()
     print("[Mercury Demo] UI loaded")
 end
 
-local ok, err = pcall(runDemo)
+local ok, err = xpcall(runDemo, function(msg) return debug.traceback(tostring(msg), 2) end)
 if not ok then
-    print("[Mercury Demo] ERROR:", tostring(err))
-    warn("[Mercury Demo] ERROR:", tostring(err))
+    print("[Mercury Demo] ERROR:\n", tostring(err))
+    warn("[Mercury Demo] ERROR:\n", tostring(err))
 end
