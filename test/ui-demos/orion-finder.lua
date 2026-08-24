@@ -32,18 +32,19 @@ local function copyToClipboard(text)
 	end)
 end
 
+local function normalizeNumber(text)
+	if typeof(text) == "number" then return text end
+	local cleaned = tostring(text):gsub("[ ,]", "")
+	return tonumber(cleaned)
+end
+
 local function matchesValue(value, targetText, exact)
 	local valueText = tostring(value)
-	local targetNum = tonumber(targetText)
-	local valueNum = typeof(value) == "number" and value or tonumber(valueText)
+	local targetNum = normalizeNumber(targetText)
+	local valueNum = typeof(value) == "number" and value or normalizeNumber(valueText)
 
 	if targetNum and valueNum then
-		if exact then
-			return valueNum == targetNum
-		else
-			-- Для чисел "вхождение" не имеет смысла, поэтому сравниваем на равенство.
-			return valueNum == targetNum
-		end
+		return valueNum == targetNum
 	end
 
 	if exact then
@@ -90,6 +91,7 @@ end
 
 local function searchByValue(root, targetText, exact, onProgress)
 	local found = {}
+	local foundPaths = {}
 	local count = 0
 	local stack = { root }
 
@@ -99,11 +101,33 @@ local function searchByValue(root, targetText, exact, onProgress)
 		for _, child in ipairs(children) do
 			local compareValue = getCompareValue(child)
 			if compareValue and matchesValue(compareValue, targetText, exact) then
-				table.insert(found, child)
+				local path = child:GetFullName()
+				if not foundPaths[path] then
+					foundPaths[path] = true
+					table.insert(found, child)
+				end
 			end
+
+			-- Ищем также в атрибутах экземпляра.
+			local ok, attrs = pcall(function()
+				return child:GetAttributes()
+			end)
+			if ok and attrs then
+				for _, attrValue in pairs(attrs) do
+					if matchesValue(attrValue, targetText, exact) then
+						local path = child:GetFullName()
+						if not foundPaths[path] then
+							foundPaths[path] = true
+							table.insert(found, child)
+						end
+						break
+					end
+				end
+			end
+
 			table.insert(stack, child)
 			count = count + 1
-			if count % 200 == 0 then
+			if count % 1000 == 0 then
 				if onProgress then
 					onProgress(count)
 				end
@@ -136,6 +160,15 @@ local function dumpPlayerValues()
 				if compareValue then
 					count = count + 1
 					print("[ValueFinder] Dump: " .. desc:GetFullName() .. " = " .. tostring(compareValue) .. " (" .. desc.ClassName .. ")")
+				end
+				local ok, attrs = pcall(function()
+					return desc:GetAttributes()
+				end)
+				if ok and attrs then
+					for attrName, attrValue in pairs(attrs) do
+						count = count + 1
+						print("[ValueFinder] Dump attr: " .. desc:GetFullName() .. "[" .. attrName .. "] = " .. tostring(attrValue) .. " (" .. desc.ClassName .. ")")
+					end
 				end
 			end
 		end
