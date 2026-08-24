@@ -5,8 +5,28 @@ StateCollector.__index = StateCollector
 
 local BALANCE_CANDIDATES = {
 	"Cash", "Money", "Balance", "Credits", "Gold", "Coins",
-	"Tokens", "Points", "Gems", " Bucks", "Dollars", "Bank",
+	"Tokens", "Points", "Gems", "Bucks", "Dollars", "Bank",
 }
+
+local function parseFormattedNumber(text)
+	if typeof(text) == "number" then return text end
+	local s = tostring(text):gsub("[ ,]", "")
+	if s == "" then return nil end
+	local num, suffix = s:match("^([%d%.]+)([KkMmBbTt]?)$")
+	if num then
+		local n = tonumber(num)
+		if n then
+			local lower = suffix:lower()
+			if lower == "k" then n = n * 1e3
+			elseif lower == "m" then n = n * 1e6
+			elseif lower == "b" then n = n * 1e9
+			elseif lower == "t" then n = n * 1e12
+			end
+			return n
+		end
+	end
+	return tonumber(s)
+end
 
 function StateCollector.new(balancePath)
 	local self = setmetatable({}, StateCollector)
@@ -107,36 +127,39 @@ function StateCollector:getBalance()
 	-- 1. Если задан путь и он работает — используем его.
 	if self.balancePath and self.balancePath ~= "" then
 		local value = self:_safeGet(player, self.balancePath)
-		if typeof(value) == "number" then
-			return value
+		local parsed = parseFormattedNumber(value)
+		if parsed then
+			return parsed
 		end
 	end
 
 	-- 2. Используем закэшированный найденный путь.
 	if self._cachedBalancePath then
 		local value = self:_safeGet(player, self._cachedBalancePath)
-		if typeof(value) == "number" then
-			return value
+		local parsed = parseFormattedNumber(value)
+		if parsed then
+			return parsed
 		end
 		self._cachedBalancePath = nil
 	end
 
-	-- 3. Ищем среди leaderstats / PlayerGui / Backpack / PlayerScripts.
-	local leaderstats = player:FindFirstChild("leaderstats")
-	if leaderstats then
-		local value = self:_findBalanceValue(leaderstats)
-		if value then
-			self._cachedBalancePath = "leaderstats." .. value.Name
-			return value.Value
-		end
-	end
+	-- 3. Ищем среди leaderstats, ReplicatedStats, PlayerGui, Backpack.
+	local roots = {
+		{ "leaderstats", player:FindFirstChild("leaderstats") },
+		{ "ReplicatedStats", player:FindFirstChild("ReplicatedStats") },
+		{ "PlayerGui", player:FindFirstChild("PlayerGui") },
+		{ "Backpack", player:FindFirstChild("Backpack") },
+	}
 
-	local gui = player:FindFirstChild("PlayerGui")
-	if gui then
-		local value = self:_findBalanceValue(gui)
-		if value then
-			self._cachedBalancePath = "PlayerGui." .. value:GetFullName():sub(#gui:GetFullName() + 2)
-			return value.Value
+	for _, rootInfo in ipairs(roots) do
+		local rootName, root = rootInfo[1], rootInfo[2]
+		if root then
+			local value = self:_findBalanceValue(root)
+			if value then
+				self._cachedBalancePath = rootName .. "." .. value.Name
+				local parsed = parseFormattedNumber(value.Value)
+				return parsed or 0
+			end
 		end
 	end
 
