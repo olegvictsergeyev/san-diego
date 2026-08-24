@@ -127,6 +127,9 @@ function StateCollector:getBalance()
 	-- 1. Если задан путь и он работает — используем его.
 	if self.balancePath and self.balancePath ~= "" then
 		local value = self:_safeGet(player, self.balancePath)
+		if typeof(value) == "Instance" and value:GetAttribute("RawValue") then
+			return value:GetAttribute("RawValue")
+		end
 		local parsed = parseFormattedNumber(value)
 		if parsed then
 			return parsed
@@ -136,6 +139,9 @@ function StateCollector:getBalance()
 	-- 2. Используем закэшированный найденный путь.
 	if self._cachedBalancePath then
 		local value = self:_safeGet(player, self._cachedBalancePath)
+		if typeof(value) == "Instance" and value:GetAttribute("RawValue") then
+			return value:GetAttribute("RawValue")
+		end
 		local parsed = parseFormattedNumber(value)
 		if parsed then
 			return parsed
@@ -157,6 +163,10 @@ function StateCollector:getBalance()
 			local value = self:_findBalanceValue(root)
 			if value then
 				self._cachedBalancePath = rootName .. "." .. value.Name
+				local raw = value:GetAttribute("RawValue")
+				if typeof(raw) == "number" then
+					return raw
+				end
 				local parsed = parseFormattedNumber(value.Value)
 				return parsed or 0
 			end
