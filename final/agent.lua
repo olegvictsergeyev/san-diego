@@ -8,7 +8,7 @@
         getgenv().StopSanDiegoAgent = true
 ]]
 
-local UI_PANEL_URL = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/ui_panel.lua?nocache=" .. tostring(math.random(1, 1000000))
+local UI_PANEL_URL = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/ui_panel.lua?nocache=" .. tostring(tick())
 
 local function loadUiPanel()
     if script then

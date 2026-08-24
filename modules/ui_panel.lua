@@ -52,7 +52,7 @@ local function loadModule(name)
             error("module URL not configured: " .. tostring(name))
         end
         -- Обходим кэш raw.githubusercontent.com
-        url = url .. "?nocache=" .. tostring(math.random(1, 1000000))
+        url = url .. "?nocache=" .. tostring(tick())
         local source = game:HttpGet(url)
         local fn, err = loadstring(source, name)
         if not fn then
