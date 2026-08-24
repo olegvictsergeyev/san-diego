@@ -271,7 +271,20 @@ local function buildUI()
 				if compareValue then
 					currentValue = tostring(compareValue)
 				end
-				print("[ValueFinder] Result: " .. item.Name .. " = " .. currentValue .. " (" .. item.ClassName .. ") at " .. path)
+
+				local matchedAttr = ""
+				local ok, attrs = pcall(function()
+					return item:GetAttributes()
+				end)
+				if ok and attrs then
+					for attrName, attrValue in pairs(attrs) do
+						if matchesValue(attrValue, targetText, exactMatch) then
+							matchedAttr = " (attr: " .. attrName .. " = " .. tostring(attrValue) .. ")"
+						end
+					end
+				end
+
+				print("[ValueFinder] Result: " .. item.Name .. " = " .. currentValue .. " (" .. item.ClassName .. ") at " .. path .. matchedAttr)
 				tabSearch:TextButton("Copy: " .. item.Name, path, function()
 					copyToClipboard(path)
 					print("[ValueFinder] Copied: " .. path)
