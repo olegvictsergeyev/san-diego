@@ -72,6 +72,11 @@ local function buildUI()
 		inputName = text
 	end)
 
+	local searchEverywhere = false
+	tabSearch:Toggle("Search everywhere", function(state)
+		searchEverywhere = state
+	end)
+
 	tabSearch:TextButton("Search", "Start smooth search", function()
 		local player = Players.LocalPlayer
 		if not player then
@@ -87,12 +92,18 @@ local function buildUI()
 
 		tabSearch:TextLabel("Searching for: " .. targetName)
 
-		local roots = {
-			player:FindFirstChild("leaderstats"),
-			player:FindFirstChild("PlayerGui"),
-			player:FindFirstChild("Backpack"),
-			player,
-		}
+		local roots
+		if searchEverywhere then
+			roots = { game }
+			tabSearch:TextLabel("Mode: full game tree")
+		else
+			roots = {
+				player:FindFirstChild("leaderstats"),
+				player:FindFirstChild("PlayerGui"),
+				player:FindFirstChild("Backpack"),
+				player,
+			}
+		end
 
 		task.spawn(function()
 			local allFound = {}
