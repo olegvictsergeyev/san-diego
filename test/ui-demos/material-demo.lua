@@ -4,16 +4,6 @@
     Запусти в Roblox-executor'е, чтобы посмотреть визуал и возможности Material Lua.
 ]]
 
-print("[Material Lua Demo] Loading library...")
-local ok, Material = pcall(function()
-    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Kinlei/MaterialLua/master/Module.lua"))()
-end)
-if not ok then
-    print("[Material Lua Demo] Failed to load:", tostring(Material))
-    return
-end
-print("[Material Lua Demo] Library loaded")
-
 local themes = {
     Dark = "Dark",
     Light = "Light",
@@ -96,18 +86,15 @@ local function buildUI(theme)
     })
 
     local tabMain = UI.New({
-        Title = "Main",
-        ImageID = 4483362458
+        Title = "Main"
     })
 
     local tabElements = UI.New({
-        Title = "Elements",
-        ImageID = 4483362458
+        Title = "Elements"
     })
 
     local tabThemes = UI.New({
-        Title = "Themes",
-        ImageID = 4483362458
+        Title = "Themes"
     })
 
     tabMain.Button({
@@ -172,6 +159,23 @@ local function buildUI(theme)
     })
 end
 
-buildUI(themes.Dark)
+local function runDemo()
+    print("[Material Lua Demo] Loading library...")
+    local ok, Material = pcall(function()
+        return loadstring(game:HttpGet("https://raw.githubusercontent.com/Kinlei/MaterialLua/master/Module.lua"))()
+    end)
+    if not ok then
+        print("[Material Lua Demo] Failed to load:", tostring(Material))
+        return
+    end
+    print("[Material Lua Demo] Library loaded")
 
-print("[Material Lua Demo] UI loaded")
+    buildUI(themes.Dark)
+    print("[Material Lua Demo] UI loaded")
+end
+
+local ok, err = xpcall(runDemo, function(msg) return debug.traceback(tostring(msg), 2) end)
+if not ok then
+    print("[Material Lua Demo] ERROR:\n", tostring(err))
+    warn("[Material Lua Demo] ERROR:\n", tostring(err))
+end
