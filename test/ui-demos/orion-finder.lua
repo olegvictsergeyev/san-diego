@@ -285,10 +285,6 @@ local function buildUI()
 				end
 
 				print("[ValueFinder] Result: " .. item.Name .. " = " .. currentValue .. " (" .. item.ClassName .. ") at " .. path .. matchedAttr)
-				tabSearch:TextButton("Copy: " .. item.Name, path, function()
-					copyToClipboard(path)
-					print("[ValueFinder] Copied: " .. path)
-				end)
 			end
 		end)
 	end)
