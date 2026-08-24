@@ -2,9 +2,11 @@
     Rayfield UI Demo
     ================
     Запусти в Roblox-executor'е, чтобы посмотреть визуал и возможности Rayfield.
+    Внимание: Rayfield не поддерживает смену темы на лету. Тема задаётся при создании окна.
 ]]
 
-local Rayfield = loadstring(game:HttpGet("https://raw.githubusercontent.com/sirius-menu/rayfield/main/source.lua"))()
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+local Players = game:GetService("Players")
 
 local themes = {
     Dark = "Default",
@@ -77,126 +79,141 @@ local themes = {
     }
 }
 
-local window = Rayfield:CreateWindow({
-    Name = "Rayfield Demo",
-    LoadingTitle = "Загрузка интерфейса...",
-    LoadingSubtitle = "by San Diego Agent",
-    ConfigurationSaving = {
-        Enabled = true,
-        FolderName = "RayfieldDemo",
-        FileName = "DemoConfig"
-    },
-    Discord = { Enabled = false },
-    KeySystem = false,
-    Theme = "Default"
-})
-
-local tabMain = window:CreateTab("Main", 4483362458)
-local tabElements = window:CreateTab("Elements", 4483362458)
-local tabThemes = window:CreateTab("Themes", 4483362458)
-
--- Main tab
-local sectionInfo = tabMain:CreateSection("Info")
-tabMain:CreateParagraph({
-    Title = "Rayfield Demo",
-    Content = "Это демонстрационный скрипт для оценки визуала и функциональности библиотеки Rayfield."
-})
-
-tabMain:CreateButton({
-    Name = "Show Notification",
-    Callback = function()
-        Rayfield:Notify({
-            Title = "Hello!",
-            Content = "This is a Rayfield notification.",
-            Duration = 4,
-            Image = 4483362458
-        })
-    end
-})
-
--- Elements tab
-local sectionInputs = tabElements:CreateSection("Inputs")
-
-tabElements:CreateToggle({
-    Name = "Enable Feature",
-    CurrentValue = false,
-    Flag = "ToggleDemo",
-    Callback = function(value)
-        print("Toggle:", value)
-    end
-})
-
-tabElements:CreateSlider({
-    Name = "Speed",
-    Range = {0, 100},
-    Increment = 1,
-    Suffix = " units",
-    CurrentValue = 50,
-    Flag = "SliderDemo",
-    Callback = function(value)
-        print("Slider:", value)
-    end
-})
-
-tabElements:CreateDropdown({
-    Name = "Select Option",
-    Options = {"Option 1", "Option 2", "Option 3"},
-    CurrentOption = "Option 1",
-    Flag = "DropdownDemo",
-    Callback = function(option)
-        print("Dropdown:", option)
-    end
-})
-
-tabElements:CreateInput({
-    Name = "Player Name",
-    PlaceholderText = "Enter nickname...",
-    RemoveTextAfterFocusLost = false,
-    Flag = "InputDemo",
-    Callback = function(text)
-        print("Input:", text)
-    end
-})
-
-tabElements:CreateKeybind({
-    Name = "Toggle Key",
-    CurrentKeybind = "Q",
-    HoldToInteract = false,
-    Flag = "KeybindDemo",
-    Callback = function(keybind)
-        print("Keybind pressed:", keybind)
-    end
-})
-
-tabElements:CreateColorPicker({
-    Name = "Pick Color",
-    Color = Color3.fromRGB(255, 0, 0),
-    Flag = "ColorDemo",
-    Callback = function(color)
-        print("Color:", color)
-    end
-})
-
-tabElements:CreateLabel("This is a label element")
-
--- Themes tab
-local sectionThemes = tabThemes:CreateSection("Theme Switcher")
-
-tabThemes:CreateDropdown({
-    Name = "Select Theme",
-    Options = {"Default (Dark)", "Light", "Gold (Custom)", "Ping (Custom)"},
-    CurrentOption = "Default (Dark)",
-    Callback = function(option)
-        if option == "Default (Dark)" then
-            Rayfield:ChangeTheme("Default")
-        elseif option == "Light" then
-            Rayfield:ChangeTheme("Light")
-        elseif option == "Gold (Custom)" then
-            Rayfield:ChangeTheme(themes.Gold)
-        elseif option == "Ping (Custom)" then
-            Rayfield:ChangeTheme(themes.Ping)
+local function destroyOldUI()
+    local coreGui = game:GetService("CoreGui")
+    for _, child in ipairs(coreGui:GetChildren()) do
+        if child.Name == "Rayfield" or child.Name == "Rayfield-Old" then
+            child:Destroy()
         end
     end
-})
+    if gethui then
+        for _, child in ipairs(gethui():GetChildren()) do
+            if child.Name == "Rayfield" or child.Name == "Rayfield-Old" then
+                child:Destroy()
+            end
+        end
+    end
+end
+
+local function buildUI(themeName)
+    destroyOldUI()
+
+    local selectedTheme = themes[themeName] or themes.Dark
+    local window = Rayfield:CreateWindow({
+        Name = "Rayfield Demo [" .. tostring(themeName) .. "]",
+        LoadingTitle = "Загрузка интерфейса...",
+        LoadingSubtitle = "by San Diego Agent",
+        ConfigurationSaving = {
+            Enabled = true,
+            FolderName = "RayfieldDemo",
+            FileName = "DemoConfig"
+        },
+        Discord = { Enabled = false },
+        KeySystem = false,
+        Theme = selectedTheme
+    })
+
+    local tabMain = window:CreateTab("Main", 4483362458)
+    local tabElements = window:CreateTab("Elements", 4483362458)
+    local tabThemes = window:CreateTab("Themes", 4483362458)
+
+    tabMain:CreateParagraph({
+        Title = "Rayfield Demo",
+        Content = "Это демонстрационный скрипт для оценки визуала и функциональности библиотеки Rayfield."
+    })
+
+    tabMain:CreateButton({
+        Name = "Show Notification",
+        Callback = function()
+            Rayfield:Notify({
+                Title = "Hello!",
+                Content = "This is a Rayfield notification.",
+                Duration = 4,
+                Image = 4483362458
+            })
+        end
+    })
+
+    tabElements:CreateToggle({
+        Name = "Enable Feature",
+        CurrentValue = false,
+        Flag = "ToggleDemo",
+        Callback = function(value)
+            print("Toggle:", value)
+        end
+    })
+
+    tabElements:CreateSlider({
+        Name = "Speed",
+        Range = {0, 100},
+        Increment = 1,
+        Suffix = " units",
+        CurrentValue = 50,
+        Flag = "SliderDemo",
+        Callback = function(value)
+            print("Slider:", value)
+        end
+    })
+
+    tabElements:CreateDropdown({
+        Name = "Select Option",
+        Options = {"Option 1", "Option 2", "Option 3"},
+        CurrentOption = "Option 1",
+        Flag = "DropdownDemo",
+        Callback = function(option)
+            local value = typeof(option) == "table" and option[1] or tostring(option)
+            print("Dropdown:", value)
+        end
+    })
+
+    tabElements:CreateInput({
+        Name = "Player Name",
+        PlaceholderText = "Enter nickname...",
+        RemoveTextAfterFocusLost = false,
+        Flag = "InputDemo",
+        Callback = function(text)
+            print("Input:", text)
+        end
+    })
+
+    tabElements:CreateKeybind({
+        Name = "Toggle Key",
+        CurrentKeybind = "Q",
+        HoldToInteract = false,
+        Flag = "KeybindDemo",
+        Callback = function(keybind)
+            print("Keybind pressed:", keybind)
+        end
+    })
+
+    tabElements:CreateColorPicker({
+        Name = "Pick Color",
+        Color = Color3.fromRGB(255, 0, 0),
+        Flag = "ColorDemo",
+        Callback = function(color)
+            print("Color:", color)
+        end
+    })
+
+    tabElements:CreateLabel("This is a label element")
+
+    tabThemes:CreateLabel("Rayfield не поддерживает смену темы на лету.")
+    tabThemes:CreateLabel("Выберите тему — интерфейс пересоздастся.")
+
+    local themeDropdown
+    themeDropdown = tabThemes:CreateDropdown({
+        Name = "Select Theme",
+        Options = {"Dark", "Light", "Gold", "Ping"},
+        CurrentOption = themeName,
+        Callback = function(option)
+            local selected = typeof(option) == "table" and option[1] or tostring(option)
+            if selected ~= themeName then
+                buildUI(selected)
+            end
+        end
+    })
+end
+
+buildUI("Dark")
 
 print("[Rayfield Demo] UI loaded")
