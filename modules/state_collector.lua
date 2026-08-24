@@ -48,9 +48,6 @@ function StateCollector:_safeGet(object, path)
 		end
 		if current == nil then return nil end
 	end
-	if typeof(current) == "Instance" and current:IsA("ValueBase") then
-		return current.Value
-	end
 	return current
 end
 
@@ -126,25 +123,41 @@ function StateCollector:getBalance()
 
 	-- 1. Если задан путь и он работает — используем его.
 	if self.balancePath and self.balancePath ~= "" then
-		local value = self:_safeGet(player, self.balancePath)
-		if typeof(value) == "Instance" and value:GetAttribute("RawValue") then
-			return value:GetAttribute("RawValue")
-		end
-		local parsed = parseFormattedNumber(value)
-		if parsed then
-			return parsed
+		local obj = self:_safeGet(player, self.balancePath)
+		if typeof(obj) == "Instance" then
+			local raw = obj:GetAttribute("RawValue")
+			if typeof(raw) == "number" then
+				return raw
+			end
+			local parsed = parseFormattedNumber(obj.Value)
+			if parsed then
+				return parsed
+			end
+		else
+			local parsed = parseFormattedNumber(obj)
+			if parsed then
+				return parsed
+			end
 		end
 	end
 
 	-- 2. Используем закэшированный найденный путь.
 	if self._cachedBalancePath then
-		local value = self:_safeGet(player, self._cachedBalancePath)
-		if typeof(value) == "Instance" and value:GetAttribute("RawValue") then
-			return value:GetAttribute("RawValue")
-		end
-		local parsed = parseFormattedNumber(value)
-		if parsed then
-			return parsed
+		local obj = self:_safeGet(player, self._cachedBalancePath)
+		if typeof(obj) == "Instance" then
+			local raw = obj:GetAttribute("RawValue")
+			if typeof(raw) == "number" then
+				return raw
+			end
+			local parsed = parseFormattedNumber(obj.Value)
+			if parsed then
+				return parsed
+			end
+		else
+			local parsed = parseFormattedNumber(obj)
+			if parsed then
+				return parsed
+			end
 		end
 		self._cachedBalancePath = nil
 	end
