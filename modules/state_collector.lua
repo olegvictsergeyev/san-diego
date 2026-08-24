@@ -3,9 +3,15 @@ local Players = game:GetService("Players")
 local StateCollector = {}
 StateCollector.__index = StateCollector
 
+local BALANCE_CANDIDATES = {
+	"Cash", "Money", "Balance", "Credits", "Gold", "Coins",
+	"Tokens", "Points", "Gems", " Bucks", "Dollars", "Bank",
+}
+
 function StateCollector.new(balancePath)
 	local self = setmetatable({}, StateCollector)
-	self.balancePath = balancePath or "leaderstats.Cash"
+	self.balancePath = balancePath or ""
+	self._cachedBalancePath = nil
 	return self
 end
 
@@ -26,6 +32,38 @@ function StateCollector:_safeGet(object, path)
 		return current.Value
 	end
 	return current
+end
+
+function StateCollector:_findBalanceValue(instance)
+	if not instance then return nil end
+	local found = {}
+	local function scan(obj)
+		for _, child in ipairs(obj:GetChildren()) do
+			if child:IsA("ValueBase") then
+				local name = child.Name
+				for _, candidate in ipairs(BALANCE_CANDIDATES) do
+					if name:lower() == candidate:lower() then
+						table.insert(found, { child, candidate })
+					end
+				end
+			end
+			scan(child)
+		end
+	end
+	scan(instance)
+
+	-- Приоритет отдаём NumberValue / IntValue / DoubleConstrainedValue
+	table.sort(found, function(a, b)
+		local priority = { NumberValue = 1, IntValue = 2, DoubleConstrainedValue = 3 }
+		local pa = priority[a[1].ClassName] or 10
+		local pb = priority[b[1].ClassName] or 10
+		return pa < pb
+	end)
+
+	if #found > 0 then
+		return found[1][1]
+	end
+	return nil
 end
 
 function StateCollector:_getLocalPlayer()
@@ -65,11 +103,48 @@ end
 function StateCollector:getBalance()
 	local player = self:_getLocalPlayer()
 	if not player then return 0 end
-	local value = self:_safeGet(player, self.balancePath)
-	if typeof(value) == "number" then
-		return value
+
+	-- 1. Если задан путь и он работает — используем его.
+	if self.balancePath and self.balancePath ~= "" then
+		local value = self:_safeGet(player, self.balancePath)
+		if typeof(value) == "number" then
+			return value
+		end
 	end
+
+	-- 2. Используем закэшированный найденный путь.
+	if self._cachedBalancePath then
+		local value = self:_safeGet(player, self._cachedBalancePath)
+		if typeof(value) == "number" then
+			return value
+		end
+		self._cachedBalancePath = nil
+	end
+
+	-- 3. Ищем среди leaderstats / PlayerGui / Backpack / PlayerScripts.
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if leaderstats then
+		local value = self:_findBalanceValue(leaderstats)
+		if value then
+			self._cachedBalancePath = "leaderstats." .. value.Name
+			return value.Value
+		end
+	end
+
+	local gui = player:FindFirstChild("PlayerGui")
+	if gui then
+		local value = self:_findBalanceValue(gui)
+		if value then
+			self._cachedBalancePath = "PlayerGui." .. value:GetFullName():sub(#gui:GetFullName() + 2)
+			return value.Value
+		end
+	end
+
 	return 0
+end
+
+function StateCollector:getBalancePath()
+	return self._cachedBalancePath or self.balancePath or ""
 end
 
 function StateCollector:getStatus()
@@ -96,6 +171,7 @@ function StateCollector:getAll(custom)
 	local customData = {
 		location = self:getLocation(),
 		team = self:getTeam(),
+		balance_path = self:getBalancePath(),
 	}
 	if typeof(custom) == "table" then
 		for k, v in pairs(custom) do
