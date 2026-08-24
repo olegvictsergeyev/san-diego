@@ -162,24 +162,12 @@ end
 local function runDemo()
     print("[Material Lua Demo] Loading library...")
 
-    -- Material Lua определяет executor по глобальным функциям и выбирает способ защиты GUI.
-    -- Некоторые современные executor'ы опознаются неправильно, поэтому временно скрываем их маркеры,
-    -- чтобы библиотека использовала стандартный CoreGui.
-    local env = (getgenv and getgenv()) or _G
-    local markers = {"syn", "getexecutorname", "pebc_create", "issentinelclosure"}
-    local saved = {}
-    for _, name in ipairs(markers) do
-        saved[name] = env[name]
-        env[name] = nil
-    end
-
     local ok, Material = pcall(function()
-        return loadstring(game:HttpGet("https://raw.githubusercontent.com/Kinlei/MaterialLua/master/Module.lua"))()
+        local src = game:HttpGet("https://raw.githubusercontent.com/Kinlei/MaterialLua/master/Module.lua")
+        -- Обходим автоматическое определение executor'а, которое может выбрать неподдерживаемый protect-метод.
+        src = src:gsub("ProtectFunctions%[GetExploit%(%)%]%([^)]+%);", "NewInstance.Parent = CoreGuiService;")
+        return loadstring(src)()
     end)
-
-    for _, name in ipairs(markers) do
-        env[name] = saved[name]
-    end
 
     if not ok then
         print("[Material Lua Demo] Failed to load:", tostring(Material))
