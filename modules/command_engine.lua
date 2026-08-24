@@ -85,10 +85,10 @@ function CommandEngine:getCommandsSpec()
 			description = "Подождать N секунд",
 			params = {
 				duration = {
-					type = "number",
+					type = "integer",
 					required = true,
 					min = 0,
-					max = 300,
+					max = 86400,
 					description = "Длительность паузы в секундах",
 				},
 			},
@@ -156,10 +156,13 @@ end
 function CommandEngine:_pause(payload)
 	local duration = payload and payload.duration
 	if typeof(duration) ~= "number" then
-		return { success = false, error = "param 'duration' must be a number" }
+		return { success = false, error = "param 'duration' must be an integer" }
 	end
-	if duration < 0 or duration > 300 then
-		return { success = false, error = "param 'duration' out of range [0, 300]" }
+	if duration % 1 ~= 0 then
+		return { success = false, error = "param 'duration' must be an integer" }
+	end
+	if duration < 0 or duration > 86400 then
+		return { success = false, error = "param 'duration' out of range [0, 86400]" }
 	end
 
 	local elapsed = 0
