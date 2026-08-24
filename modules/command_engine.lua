@@ -46,10 +46,10 @@ function CommandEngine:getCommandsSpec()
 			description = "Сместить персонажа по оси X",
 			params = {
 				value = {
-					type = "number",
+					type = "integer",
 					required = true,
-					min = -10000,
-					max = 10000,
+					min = -7000,
+					max = 7000,
 					description = "Смещение по оси X в студиях",
 				},
 			},
@@ -59,10 +59,10 @@ function CommandEngine:getCommandsSpec()
 			description = "Сместить персонажа по оси Y",
 			params = {
 				value = {
-					type = "number",
+					type = "integer",
 					required = true,
-					min = -10000,
-					max = 10000,
+					min = -7000,
+					max = 7000,
 					description = "Смещение по оси Y в студиях",
 				},
 			},
@@ -72,10 +72,10 @@ function CommandEngine:getCommandsSpec()
 			description = "Сместить персонажа по оси Z",
 			params = {
 				value = {
-					type = "number",
+					type = "integer",
 					required = true,
-					min = -10000,
-					max = 10000,
+					min = -7000,
+					max = 7000,
 					description = "Смещение по оси Z в студиях",
 				},
 			},
@@ -104,10 +104,13 @@ end
 function CommandEngine:_validateMove(payload)
 	local value = payload and payload.value
 	if typeof(value) ~= "number" then
-		return false, "param 'value' must be a number"
+		return false, "param 'value' must be an integer"
 	end
-	if value < -10000 or value > 10000 then
-		return false, "param 'value' out of range [-10000, 10000]"
+	if value % 1 ~= 0 then
+		return false, "param 'value' must be an integer"
+	end
+	if value < -7000 or value > 7000 then
+		return false, "param 'value' out of range [-7000, 7000]"
 	end
 	return true, value
 end
