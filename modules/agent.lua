@@ -36,8 +36,6 @@ end
 
 function Agent:_sendStatus()
 	local data = self.state:getAll(self.config.customData)
-	data.game_slug = self.config.gameSlug
-
 	local ok, res = self.http:post("/game/update", data)
 	if ok then
 		self:_log("INFO", "status sent", res.statusCode)
@@ -60,16 +58,35 @@ function Agent:_updateCommandStatus(commandId, status, message)
 	end
 end
 
-function Agent:_sendCommandResult(commandId, result)
-	if not commandId then return end
-	local okJson, body = pcall(function()
-		return game:GetService("HttpService"):JSONEncode({ result = result })
-	end)
-	if not okJson then
-		self:_log("ERROR", "failed to encode command result:", tostring(body))
-		return
+function Agent:_resultToString(result)
+	local HttpService = game:GetService("HttpService")
+	if typeof(result) == "string" then
+		return result
 	end
-	local ok, res = self.http:post("/commands/" .. tostring(commandId) .. "/result", body, { ["Content-Type"] = "application/json" })
+	if typeof(result) == "table" then
+		if result.data ~= nil then
+			local ok, encoded = pcall(function()
+				return HttpService:JSONEncode(result.data)
+			end)
+			if ok then
+				return encoded
+			end
+		end
+		if result.message then
+			return tostring(result.message)
+		end
+		if result.error then
+			return tostring(result.error)
+		end
+	end
+	return tostring(result)
+end
+
+function Agent:_sendCommandResult(commandId, result, status)
+	if not commandId then return end
+	local resultString = self:_resultToString(result)
+	local body = { result = resultString, status = status }
+	local ok, res = self.http:post("/commands/" .. tostring(commandId) .. "/result", body)
 	if ok then
 		self:_log("INFO", "command result sent", commandId, res.statusCode)
 	else
@@ -83,8 +100,7 @@ function Agent:_finishCommand(commandId, status, result)
 	self.lastCommandMessage = result.error or result.message
 	self.lastCommandResult = result
 
-	self:_sendCommandResult(commandId, result)
-	self:_updateCommandStatus(commandId, status, self.lastCommandMessage)
+	self:_sendCommandResult(commandId, result, status)
 end
 
 function Agent:_reportLastCommandAndClear()
@@ -101,12 +117,7 @@ function Agent:_fetchNextCommand()
 	local nickname = self.state:getNickname()
 	local query = {
 		nickname = nickname,
-		game_slug = self.config.gameSlug,
 	}
-	if self.lastCommandId and self.lastCommandStatus then
-		query.last_id = self.lastCommandId
-		query.last_status = self.lastCommandStatus
-	end
 
 	local ok, res = self.http:get("/commands/next", query)
 	if not ok then
@@ -168,7 +179,7 @@ function Agent:_handleCommand(command)
 		self.lastCommandStatus = "cancelled"
 		self.lastCommandMessage = result.error
 		self.lastCommandResult = result
-		self:_sendCommandResult(command.id, result)
+		self:_sendCommandResult(command.id, result, "cancelled")
 	else
 		self:_finishCommand(command.id, status, result)
 	end
