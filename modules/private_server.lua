@@ -12,7 +12,7 @@ function PrivateServer.new(opts)
 end
 
 function PrivateServer:_queueReload()
-	local code = 'task.wait(0.5)\nloadstring(game:HttpGet("' .. self.loaderUrl .. '?nocache=" .. tostring(tick())))()'
+	local code = 'task.wait(0.5)\nprint("[SanDiegoAgent][QueueOnTeleport] reloading loader after teleport")\nloadstring(game:HttpGet("' .. self.loaderUrl .. '?nocache=" .. tostring(tick())))()'
 	if self.compat and self.compat.queueOnTeleport then
 		return self.compat.queueOnTeleport(code)
 	end
