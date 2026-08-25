@@ -25,5 +25,4 @@ local function loadUiPanel()
 end
 
 local UIPanel = loadUiPanel()
-print("[SanDiegoAgent][Loader] ui_panel loaded, version unknown until run")
 UIPanel.run()

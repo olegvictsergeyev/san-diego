@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.4.17",
+    version = "0.4.18",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -90,8 +90,6 @@ local DisconnectWatcher = loadModule("disconnect_watcher")
 local ToggleUI = loadModule("ui_toggle")
 local CommandEngine = loadModule("command_engine")
 local Agent = loadModule("agent")
-
-print("[SanDiegoAgent][UI] modules loaded, version", CONFIG.version)
 
 local currentAgent = nil
 local currentMainGui = nil
@@ -254,7 +252,6 @@ local function updateInfoLabels()
 end
 
 local function buildUI()
-    print("[SanDiegoAgent][UI] buildUI started")
     local Orion = loadOrion()
     if not Orion then
         warn("[SanDiegoAgent][UI] buildUI aborted: Orion not loaded")
@@ -279,7 +276,6 @@ local function buildUI()
     currentMainGui = findOrionGui(existingGuis)
 
     if currentMainGui then
-        print("[SanDiegoAgent][UI] Orion ScreenGui found:", currentMainGui.Name)
         local ok, err = pcall(function()
             ToggleUI.new(currentMainGui, {
                 parent = getUiParent(),
@@ -328,14 +324,11 @@ local function buildUI()
             task.wait(0.5)
         end
     end)
-
-    print("[SanDiegoAgent][UI] Panel built and agent started")
 end
 
 local UIPanel = {}
 
 function UIPanel.run()
-    print("[SanDiegoAgent][UI] UIPanel.run started")
     getgenv().StopSanDiegoAgent = false
 
     if CONFIG.showUI then

@@ -190,7 +190,6 @@ function ToggleUI:_createCloseOverlay(btn)
 	btn.Active = false
 
 	local function onClick()
-		print("[SanDiegoAgent][ToggleUI] close overlay clicked")
 		self:collapse()
 	end
 	overlay.MouseButton1Click:Connect(onClick)
@@ -198,13 +197,10 @@ function ToggleUI:_createCloseOverlay(btn)
 end
 
 function ToggleUI:_bindCloseButton()
-	print("[SanDiegoAgent][ToggleUI] binding close button")
 	local btn = self:_findCloseButton()
 	if not btn then
-		print("[SanDiegoAgent][ToggleUI] close button not found")
 		return
 	end
-	print("[SanDiegoAgent][ToggleUI] close button found:", btn.Name, "class:", btn.ClassName)
 
 	if typeof(getconnections) == "function" then
 		local ok, conns = pcall(getconnections, btn.MouseButton1Click)
