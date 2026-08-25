@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.4.7",
+    version = "0.4.8",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -179,8 +179,15 @@ local function findMainPage(gui)
     return nil
 end
 
-local function findOrionGui()
+local function findOrionGui(preExisting)
     local hui = Compat.gethui()
+    if preExisting then
+        for _, sg in ipairs(hui:GetChildren()) do
+            if sg:IsA("ScreenGui") and not preExisting[sg] then
+                return sg
+            end
+        end
+    end
     local candidates = {}
     for _, sg in ipairs(hui:GetChildren()) do
         if sg:IsA("ScreenGui") then
@@ -234,9 +241,17 @@ local function buildUI()
         return
     end
 
+    local hui = Compat.gethui()
+    local existingGuis = {}
+    for _, sg in ipairs(hui:GetChildren()) do
+        if sg:IsA("ScreenGui") then
+            existingGuis[sg] = true
+        end
+    end
+
     local window = Orion:CreateOrion("San Diego Agent")
-    task.wait(0.05)
-    currentMainGui = findOrionGui()
+    task.wait(0.1)
+    currentMainGui = findOrionGui(existingGuis)
 
     if currentMainGui then
         print("[SanDiegoAgent][UI] Orion ScreenGui found:", currentMainGui.Name)
