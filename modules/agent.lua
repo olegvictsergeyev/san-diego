@@ -62,7 +62,14 @@ end
 
 function Agent:_sendCommandResult(commandId, result)
 	if not commandId then return end
-	local ok, res = self.http:post("/commands/" .. tostring(commandId) .. "/result", { result = result })
+	local okJson, body = pcall(function()
+		return game:GetService("HttpService"):JSONEncode({ result = result })
+	end)
+	if not okJson then
+		self:_log("ERROR", "failed to encode command result:", tostring(body))
+		return
+	end
+	local ok, res = self.http:post("/commands/" .. tostring(commandId) .. "/result", body, { ["Content-Type"] = "application/json" })
 	if ok then
 		self:_log("INFO", "command result sent", commandId, res.statusCode)
 	else
