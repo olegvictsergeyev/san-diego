@@ -169,19 +169,26 @@ function ToggleUI:_createCloseOverlay(btn)
 	if not parent then
 		return
 	end
-	local overlay = Instance.new("TextButton")
+	local overlay = Instance.new("ImageButton")
 	overlay.Name = "CloseOverlay"
 	overlay.Size = btn.Size
 	overlay.Position = btn.Position
 	overlay.AnchorPoint = btn.AnchorPoint
 	overlay.BackgroundTransparency = 1
-	overlay.Text = ""
+	overlay.Image = btn.Image
+	overlay.ImageColor3 = btn.ImageColor3
+	overlay.ImageTransparency = btn.ImageTransparency
 	overlay.ZIndex = btn.ZIndex + 10
 	overlay.Parent = parent
 
-	overlay.MouseButton1Click:Connect(function()
+	btn.Active = false
+
+	local function onClick()
+		print("[SanDiegoAgent][ToggleUI] close overlay clicked")
 		self:toggle()
-	end)
+	end
+	overlay.MouseButton1Click:Connect(onClick)
+	overlay.Activated:Connect(onClick)
 end
 
 function ToggleUI:_bindCloseButton()
