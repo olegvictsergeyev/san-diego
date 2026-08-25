@@ -61,8 +61,10 @@ Long-poll. Query-параметры:
 ## Поддерживаемые команды
 
 - `get_commands` — без параметров, возвращает список доступных команд.
-- `move_x`, `move_y`, `move_z` — параметр `value` (number, -10000..10000).
-- `pause` — параметр `duration` (number, 0..300).
+- `move_x`, `move_y`, `move_z` — параметр `value` (number, -7000..7000).
+- `pause` — параметр `duration` (number, 0..86400).
+- `respawn` — без параметров.
+- `join_private_server` — параметр `code` (string, 1..64).
 - `cancel` — без параметров, отменяет текущую команду.
 
 ## Жизненный цикл команды

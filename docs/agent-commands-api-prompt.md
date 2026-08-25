@@ -122,6 +122,12 @@ POST /commands/{id}/result
     {
       "name": "respawn",
       "params": {}
+    },
+    {
+      "name": "join_private_server",
+      "params": {
+        "code": { "type": "string", "min": 1, "max": 64 }
+      }
     }
   ]
 }

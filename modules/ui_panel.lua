@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.1.0",
+    version = "0.2.0",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -39,6 +39,7 @@ local CONFIG = {
         state_collector = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/state_collector.lua",
         command_engine = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/command_engine.lua",
         agent = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/agent.lua",
+        private_server = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/private_server.lua",
     },
 
     -- true при запуске через loadstring (script == nil), иначе false
@@ -69,6 +70,7 @@ end
 
 local HttpClient = loadModule("http_client")
 local StateCollector = loadModule("state_collector")
+local PrivateServer = loadModule("private_server")
 local CommandEngine = loadModule("command_engine")
 local Agent = loadModule("agent")
 
@@ -78,7 +80,8 @@ local stateReader = StateCollector.new(CONFIG.balancePath, CONFIG.version)
 local function makeAgent()
     local http = HttpClient.new(CONFIG.baseUrl)
     local state = StateCollector.new(CONFIG.balancePath, CONFIG.version)
-    local engine = CommandEngine.new()
+    local privateServer = PrivateServer.new()
+    local engine = CommandEngine.new(privateServer)
     return Agent.new(CONFIG, http, state, engine)
 end
 

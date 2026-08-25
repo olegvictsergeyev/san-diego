@@ -3,10 +3,20 @@ local Players = game:GetService("Players")
 local CommandEngine = {}
 CommandEngine.__index = CommandEngine
 
-function CommandEngine.new()
+function CommandEngine.new(privateServer)
 	local self = setmetatable({}, CommandEngine)
 	self.cancelled = false
 	self.currentCommandId = nil
+	if privateServer then
+		self.privateServer = privateServer
+	else
+		local ok, PrivateServer = pcall(function()
+			return require(script.Parent:WaitForChild("private_server"))
+		end)
+		if ok and PrivateServer then
+			self.privateServer = PrivateServer.new()
+		end
+	end
 	return self
 end
 
@@ -141,6 +151,19 @@ function CommandEngine:getCommandsSpec()
 			name = "cancel",
 			description = "Отменить текущую команду",
 			params = {},
+		},
+		{
+			name = "join_private_server",
+			description = "Перейти на приватный сервер по коду",
+			params = {
+				code = {
+					type = "string",
+					required = true,
+					min = 1,
+					max = 64,
+					description = "Код приватного сервера",
+				},
+			},
 		},
 	}
 end
@@ -309,6 +332,14 @@ function CommandEngine:_cancelCurrent()
 	return { success = true, data = { cancelledCommandId = self.currentCommandId } }
 end
 
+function CommandEngine:_joinPrivateServer(payload)
+	local code = payload and payload.code
+	if typeof(code) ~= "string" or code:gsub("%s+", "") == "" then
+		return { success = false, error = "param 'code' must be a non-empty string" }
+	end
+	return self.privateServer:joinByCode(code)
+end
+
 function CommandEngine:execute(command)
 	local name = command.name
 	local payload = command.payload or {}
@@ -328,6 +359,8 @@ function CommandEngine:execute(command)
 		result = self:_pause(payload)
 	elseif name == "respawn" then
 		result = self:_respawn()
+	elseif name == "join_private_server" then
+		result = self:_joinPrivateServer(payload)
 	elseif name == "cancel" then
 		result = self:_cancelCurrent()
 	else
