@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.2.4",
+    version = "0.2.5",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -40,6 +40,7 @@ local CONFIG = {
         command_engine = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/command_engine.lua",
         agent = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/agent.lua",
         private_server = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/private_server.lua",
+        popup_closer = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/popup_closer.lua",
     },
 
     -- true при запуске через loadstring (script == nil), иначе false
@@ -71,11 +72,13 @@ end
 local HttpClient = loadModule("http_client")
 local StateCollector = loadModule("state_collector")
 local PrivateServer = loadModule("private_server")
+local PopupCloser = loadModule("popup_closer")
 local CommandEngine = loadModule("command_engine")
 local Agent = loadModule("agent")
 
 local currentAgent = nil
 local stateReader = StateCollector.new(CONFIG.balancePath, CONFIG.version)
+local popupCloser = PopupCloser.new()
 
 local function makeAgent()
     local http = HttpClient.new(CONFIG.baseUrl)
@@ -211,6 +214,9 @@ local function buildUI()
     -- Автозапуск агента
     startAgent()
 
+    -- Автозакрытие стартовых попапов (StarterPack и др.)
+    popupCloser:start()
+
     -- Обновление координат и баланса в UI
     task.spawn(function()
         while true do
@@ -231,6 +237,7 @@ function UIPanel.run()
         buildUI()
     else
         startAgent()
+        popupCloser:start()
     end
 
     -- Фоновый поток для обработки флага остановки
