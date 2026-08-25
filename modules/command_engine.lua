@@ -10,14 +10,53 @@ function CommandEngine.new()
 	return self
 end
 
-function CommandEngine:_getHrp()
-	local player = Players.LocalPlayer
+function CommandEngine:_getPlayer()
+	return Players.LocalPlayer
+end
+
+function CommandEngine:_getCharacter()
+	local player = self:_getPlayer()
 	if not player then return nil end
 	local character = player.Character
+	if not character then
+		-- Дадим персонажу небольшое время на загрузку.
+		local ok, char = pcall(function()
+			return player.CharacterAdded:Wait()
+		end)
+		if ok then
+			character = char
+		end
+	end
+	return character
+end
+
+function CommandEngine:_getHrp()
+	local character = self:_getCharacter()
 	if not character then return nil end
 	local hrp = character:FindFirstChild("HumanoidRootPart")
 	if hrp and hrp:IsA("BasePart") then
 		return hrp
+	end
+	-- Подождём, если HRP ещё не создан.
+	local ok, found = pcall(function()
+		return character:WaitForChild("HumanoidRootPart", 5)
+	end)
+	if ok and found and found:IsA("BasePart") then
+		return found
+	end
+	return nil
+end
+
+function CommandEngine:_getHumanoid()
+	local character = self:_getCharacter()
+	if not character then return nil end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid then return humanoid end
+	local ok, found = pcall(function()
+		return character:WaitForChild("Humanoid", 5)
+	end)
+	if ok and found and found:IsA("Humanoid") then
+		return found
 	end
 	return nil
 end
@@ -94,6 +133,11 @@ function CommandEngine:getCommandsSpec()
 			},
 		},
 		{
+			name = "respawn",
+			description = "Умереть и возродиться",
+			params = {},
+		},
+		{
 			name = "cancel",
 			description = "Отменить текущую команду",
 			params = {},
@@ -130,16 +174,57 @@ function CommandEngine:_moveAxis(axis, payload)
 		return { success = false, error = "cancelled" }
 	end
 
-	local offset = Vector3.zero
-	if axis == "x" then
-		offset = Vector3.new(value, 0, 0)
-	elseif axis == "y" then
-		offset = Vector3.new(0, value, 0)
-	elseif axis == "z" then
-		offset = Vector3.new(0, 0, value)
+	local pos = hrp.Position
+	local startValue = pos[axis]
+	local sign = value >= 0 and 1 or -1
+
+	-- Шаги взяты из реального поведения игры San Diego:
+	-- X/Z: 20 студий за шаг, пауза 0.1 с.
+	-- Y: 100 студий за шаг, пауза 0.5 с.
+	local stepSize, waitTime
+	if axis == "y" then
+		stepSize = 100 * sign
+		waitTime = 0.5
+	else
+		stepSize = 20 * sign
+		waitTime = 0.1
 	end
 
-	hrp.CFrame = hrp.CFrame + offset
+	local steps = math.floor(math.abs(value) / math.abs(stepSize))
+	local current = startValue
+
+	for _ = 1, steps do
+		if self:_isCancelled() then
+			return { success = false, error = "cancelled" }
+		end
+
+		current = current + stepSize
+		local newPos
+		if axis == "x" then
+			newPos = Vector3.new(current, pos.Y, pos.Z)
+		elseif axis == "y" then
+			newPos = Vector3.new(pos.X, current, pos.Z)
+		else
+			newPos = Vector3.new(pos.X, pos.Y, current)
+		end
+		hrp.CFrame = CFrame.new(newPos)
+		task.wait(waitTime)
+	end
+
+	if self:_isCancelled() then
+		return { success = false, error = "cancelled" }
+	end
+
+	local finalValue = startValue + value
+	local finalPos
+	if axis == "x" then
+		finalPos = Vector3.new(finalValue, pos.Y, pos.Z)
+	elseif axis == "y" then
+		finalPos = Vector3.new(pos.X, finalValue, pos.Z)
+	else
+		finalPos = Vector3.new(pos.X, pos.Y, finalValue)
+	end
+	hrp.CFrame = CFrame.new(finalPos)
 
 	return {
 		success = true,
@@ -177,6 +262,18 @@ function CommandEngine:_pause(payload)
 	return { success = true, data = { elapsed = math.round(elapsed * 10) / 10 } }
 end
 
+function CommandEngine:_respawn()
+	local humanoid = self:_getHumanoid()
+	if not humanoid then
+		return { success = false, error = "Humanoid not found" }
+	end
+	if self:_isCancelled() then
+		return { success = false, error = "cancelled" }
+	end
+	humanoid.Health = 0
+	return { success = true, data = { respawned = true } }
+end
+
 function CommandEngine:_cancelCurrent()
 	self:requestCancel()
 	return { success = true, data = { cancelledCommandId = self.currentCommandId } }
@@ -199,6 +296,8 @@ function CommandEngine:execute(command)
 		result = self:_moveAxis("z", payload)
 	elseif name == "pause" then
 		result = self:_pause(payload)
+	elseif name == "respawn" then
+		result = self:_respawn()
 	elseif name == "cancel" then
 		result = self:_cancelCurrent()
 	else
