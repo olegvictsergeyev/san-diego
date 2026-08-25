@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.4.15",
+    version = "0.4.16",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -280,10 +280,15 @@ local function buildUI()
 
     if currentMainGui then
         print("[SanDiegoAgent][UI] Orion ScreenGui found:", currentMainGui.Name)
-        ToggleUI.new(currentMainGui, {
-            parent = getUiParent(),
-            initialVisible = false,
-        })
+        local ok, err = pcall(function()
+            ToggleUI.new(currentMainGui, {
+                parent = getUiParent(),
+                initialVisible = false,
+            })
+        end)
+        if not ok then
+            warn("[SanDiegoAgent][UI] ToggleUI failed:", tostring(err))
+        end
     else
         warn("[SanDiegoAgent][UI] Orion ScreenGui not found, toggle will not be created")
     end

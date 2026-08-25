@@ -192,25 +192,27 @@ function ToggleUI:_createCloseOverlay(btn)
 end
 
 function ToggleUI:_bindCloseButton()
+	print("[SanDiegoAgent][ToggleUI] binding close button")
 	local btn = self:_findCloseButton()
 	if not btn then
 		print("[SanDiegoAgent][ToggleUI] close button not found")
 		return
 	end
-	print("[SanDiegoAgent][ToggleUI] close button found:", btn.Name, "class:", btn.ClassName, "text:", btn:IsA("TextButton") and btn.Text or "")
+	print("[SanDiegoAgent][ToggleUI] close button found:", btn.Name, "class:", btn.ClassName)
 
 	if typeof(getconnections) == "function" then
-		local conns = getconnections(btn.MouseButton1Click)
-		print("[SanDiegoAgent][ToggleUI] close button connections:", #conns)
-		for _, conn in ipairs(conns) do
-			if typeof(conn.Enabled) == "boolean" then
-				conn.Enabled = false
+		local ok, conns = pcall(getconnections, btn.MouseButton1Click)
+		if ok and conns then
+			for _, conn in ipairs(conns) do
+				pcall(function()
+					conn.Enabled = false
+				end)
 			end
 		end
 	end
 
-	btn.MouseButton1Click:Connect(function()
-		self:toggle()
+	pcall(function()
+		btn.Active = false
 	end)
 
 	self:_createCloseOverlay(btn)
