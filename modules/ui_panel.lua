@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.4.6",
+    version = "0.4.7",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -181,15 +181,21 @@ end
 
 local function findOrionGui()
     local hui = Compat.gethui()
+    local candidates = {}
     for _, sg in ipairs(hui:GetChildren()) do
         if sg:IsA("ScreenGui") then
+            if sg.Name == "San Diego Agent" then
+                return sg
+            end
             for _, desc in ipairs(sg:GetDescendants()) do
-                if desc:IsA("TextLabel") and desc.Text == "San Diego Agent" then
+                if (desc:IsA("TextLabel") or desc:IsA("TextButton") or desc:IsA("TextBox")) and desc.Text == "San Diego Agent" then
                     return sg
                 end
             end
+            table.insert(candidates, sg.Name)
         end
     end
+    warn("[SanDiegoAgent][UI] Orion ScreenGui not found. ScreenGuis: " .. table.concat(candidates, ", "))
     return nil
 end
 
@@ -229,9 +235,11 @@ local function buildUI()
     end
 
     local window = Orion:CreateOrion("San Diego Agent")
+    task.wait(0.05)
     currentMainGui = findOrionGui()
 
     if currentMainGui then
+        print("[SanDiegoAgent][UI] Orion ScreenGui found:", currentMainGui.Name)
         ToggleUI.new(currentMainGui, {
             parent = Compat.gethui(),
             initialVisible = false,
