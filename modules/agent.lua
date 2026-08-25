@@ -115,9 +115,21 @@ function Agent:_fetchNextCommand()
 		return nil
 	end
 
+	-- Backend может возвращать команду напрямую или в поле command.
 	local command = res.body.command or res.body
 	if not command or not command.id then
 		return nil
+	end
+
+	-- Адаптируем поля backend'а к внутреннему формату агента.
+	command.name = command.command_type or command.name
+	if typeof(command.payload) == "string" and command.payload ~= "" then
+		local parseOk, parsed = pcall(function()
+			return game:GetService("HttpService"):JSONDecode(command.payload)
+		end)
+		if parseOk then
+			command.payload = parsed
+		end
 	end
 
 	return command
