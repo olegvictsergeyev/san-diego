@@ -194,7 +194,14 @@ function StateCollector:getBalancePath()
 	return self._cachedBalancePath or self.balancePath or ""
 end
 
+function StateCollector:setStatusOverride(value)
+	self._statusOverride = value
+end
+
 function StateCollector:getStatus()
+	if self._statusOverride then
+		return self._statusOverride
+	end
 	local player = self:_getLocalPlayer()
 	if not player then return "offline" end
 	return "online"

@@ -144,6 +144,23 @@ function DisconnectWatcher:_onPromptShown()
 		return
 	end
 	self.handled = true
+
+	local prompt = self:_getErrorPrompt()
+	if prompt then
+		local function onGone()
+			if not prompt:IsDescendantOf(game) or not prompt.Visible then
+				self:_log("prompt cleared")
+				if self.agent and self.agent.clearDisconnect then
+					pcall(function()
+						self.agent:clearDisconnect()
+					end)
+				end
+			end
+		end
+		prompt:GetPropertyChangedSignal("Visible"):Connect(onGone)
+		prompt.AncestryChanged:Connect(onGone)
+	end
+
 	if self.opts.autoReconnect then
 		self:_log("autoReconnect enabled, clicking Reconnect")
 		task.spawn(function()

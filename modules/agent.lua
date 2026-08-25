@@ -49,9 +49,19 @@ function Agent:reportDisconnect(info)
 		return
 	end
 	self:_log("WARN", "disconnect detected:", tostring(info.title), tostring(info.code))
+	if self.state and self.state.setStatusOverride then
+		self.state:setStatusOverride("error")
+	end
 	self.config.customData.disconnect = info
 	self:_sendStatus()
+end
+
+function Agent:clearDisconnect()
+	if self.state and self.state.setStatusOverride then
+		self.state:setStatusOverride(nil)
+	end
 	self.config.customData.disconnect = nil
+	self:_sendStatus()
 end
 
 function Agent:_updateCommandStatus(commandId, status, message)
