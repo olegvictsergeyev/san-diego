@@ -142,8 +142,8 @@ function PrivateServer:joinByCode(code)
 	end
 	self:_log("FOUND", "DecisionPromptGui")
 
-	-- Даём GUI один кадр на инициализацию подключений.
-	task.wait(0.3)
+	-- Даём GUI и обработчику Join завершить инициализацию состояния попапа.
+	task.wait(1.5)
 
 	local yesBtn = self:_find(promptGui, { "Frame", "ButtonRow", "YesButton" })
 	if not yesBtn then
