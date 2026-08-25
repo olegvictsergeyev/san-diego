@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.4.11",
+    version = "0.4.12",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -34,20 +34,23 @@ local CONFIG = {
     customData = {},
 
     -- URL модулей
-    moduleUrls = {
-        http_client = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/http_client.lua",
-        state_collector = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/state_collector.lua",
-        command_engine = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/command_engine.lua",
-        agent = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/agent.lua",
-        private_server = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/private_server.lua",
-        popup_closer = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/popup_closer.lua",
-        compat = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/compat.lua",
-        disconnect_watcher = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/disconnect_watcher.lua",
-        ui_toggle = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/ui_toggle.lua",
-    },
+    moduleUrls = (function()
+        local base = getgenv().SanDiegoAgentBaseUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main"
+        return {
+            http_client = base .. "/modules/http_client.lua",
+            state_collector = base .. "/modules/state_collector.lua",
+            command_engine = base .. "/modules/command_engine.lua",
+            agent = base .. "/modules/agent.lua",
+            private_server = base .. "/modules/private_server.lua",
+            popup_closer = base .. "/modules/popup_closer.lua",
+            compat = base .. "/modules/compat.lua",
+            disconnect_watcher = base .. "/modules/disconnect_watcher.lua",
+            ui_toggle = base .. "/modules/ui_toggle.lua",
+        }
+    end)(),
 
     -- URL загрузчика для перезапуска после телепорта
-    agentLoaderUrl = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/final/agent.lua",
+    agentLoaderUrl = (getgenv().SanDiegoAgentBaseUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main") .. "/final/agent.lua",
 
     -- true при запуске через loadstring (script == nil), иначе false
     useRemoteModules = (script == nil),

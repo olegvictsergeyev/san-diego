@@ -12,7 +12,8 @@ function PrivateServer.new(opts)
 end
 
 function PrivateServer:_queueReload()
-	local code = 'task.wait(0.5)\nprint("[SanDiegoAgent][QueueOnTeleport] reloading loader after teleport")\nloadstring(game:HttpGet("' .. self.loaderUrl .. '?nocache=" .. tostring(tick())))()'
+	local baseUrl = tostring(self.loaderUrl):match("(.+)/final/agent%.lua$") or self.loaderUrl
+	local code = 'local baseUrl = "' .. baseUrl .. '"\ngetgenv().SanDiegoAgentBaseUrl = baseUrl\ntask.wait(0.5)\nprint("[SanDiegoAgent][QueueOnTeleport] reloading loader after teleport")\nloadstring(game:HttpGet(baseUrl .. "/final/agent.lua?nocache=" .. tostring(tick())))()'
 	if self.compat and self.compat.queueOnTeleport then
 		return self.compat.queueOnTeleport(code)
 	end
