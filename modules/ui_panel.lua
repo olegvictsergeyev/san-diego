@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.4.8",
+    version = "0.4.9",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -153,6 +153,14 @@ local function getCoord(axis)
     return 0
 end
 
+local function getUiParent()
+    local hui = Compat.gethui()
+    if typeof(hui) == "Instance" and hui:IsA("CoreGui") then
+        return hui
+    end
+    return game.CoreGui
+end
+
 local function copyToClipboard(text)
     Compat.setClipboard(text)
     print("[SanDiegoAgent][UI] Скопировано:", text)
@@ -180,29 +188,38 @@ local function findMainPage(gui)
 end
 
 local function findOrionGui(preExisting)
-    local hui = Compat.gethui()
-    if preExisting then
-        for _, sg in ipairs(hui:GetChildren()) do
-            if sg:IsA("ScreenGui") and not preExisting[sg] then
-                return sg
-            end
-        end
-    end
-    local candidates = {}
-    for _, sg in ipairs(hui:GetChildren()) do
-        if sg:IsA("ScreenGui") then
-            if sg.Name == "San Diego Agent" then
-                return sg
-            end
-            for _, desc in ipairs(sg:GetDescendants()) do
-                if (desc:IsA("TextLabel") or desc:IsA("TextButton") or desc:IsA("TextBox")) and desc.Text == "San Diego Agent" then
+    local function searchRoot(root)
+        if preExisting then
+            for _, sg in ipairs(root:GetChildren()) do
+                if sg:IsA("ScreenGui") and not preExisting[sg] then
                     return sg
                 end
             end
-            table.insert(candidates, sg.Name)
         end
+        for _, sg in ipairs(root:GetChildren()) do
+            if sg:IsA("ScreenGui") then
+                if sg.Name == "San Diego Agent" then
+                    return sg
+                end
+                for _, desc in ipairs(sg:GetDescendants()) do
+                    if (desc:IsA("TextLabel") or desc:IsA("TextButton") or desc:IsA("TextBox")) and desc.Text == "San Diego Agent" then
+                        return sg
+                    end
+                end
+            end
+        end
+        return nil
     end
-    warn("[SanDiegoAgent][UI] Orion ScreenGui not found. ScreenGuis: " .. table.concat(candidates, ", "))
+
+    local found = searchRoot(game.CoreGui)
+    if found then
+        return found
+    end
+    found = searchRoot(Compat.gethui())
+    if found then
+        return found
+    end
+    warn("[SanDiegoAgent][UI] Orion ScreenGui not found")
     return nil
 end
 
@@ -243,6 +260,11 @@ local function buildUI()
 
     local hui = Compat.gethui()
     local existingGuis = {}
+    for _, sg in ipairs(game.CoreGui:GetChildren()) do
+        if sg:IsA("ScreenGui") then
+            existingGuis[sg] = true
+        end
+    end
     for _, sg in ipairs(hui:GetChildren()) do
         if sg:IsA("ScreenGui") then
             existingGuis[sg] = true
@@ -256,7 +278,7 @@ local function buildUI()
     if currentMainGui then
         print("[SanDiegoAgent][UI] Orion ScreenGui found:", currentMainGui.Name)
         ToggleUI.new(currentMainGui, {
-            parent = Compat.gethui(),
+            parent = getUiParent(),
             initialVisible = false,
         })
     else
