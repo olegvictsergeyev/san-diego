@@ -124,6 +124,18 @@ POST /commands/{id}/result
       "params": {}
     },
     {
+      "name": "turn_left",
+      "params": {
+        "degrees": { "type": "number", "min": 1, "max": 360 }
+      }
+    },
+    {
+      "name": "turn_right",
+      "params": {
+        "degrees": { "type": "number", "min": 1, "max": 360 }
+      }
+    },
+    {
       "name": "join_private_server",
       "params": {
         "code": { "type": "string", "min": 1, "max": 64 }

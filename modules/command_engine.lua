@@ -153,6 +153,32 @@ function CommandEngine:getCommandsSpec()
 			params = {},
 		},
 		{
+			name = "turn_left",
+			description = "Повернуть персонажа влево на N градусов",
+			params = {
+				degrees = {
+					type = "integer",
+					required = true,
+					min = 1,
+					max = 360,
+					description = "Угол поворота в градусах",
+				},
+			},
+		},
+		{
+			name = "turn_right",
+			description = "Повернуть персонажа вправо на N градусов",
+			params = {
+				degrees = {
+					type = "integer",
+					required = true,
+					min = 1,
+					max = 360,
+					description = "Угол поворота в градусах",
+				},
+			},
+		},
+		{
 			name = "join_private_server",
 			description = "Перейти на приватный сервер по коду",
 			params = {
@@ -345,6 +371,58 @@ function CommandEngine:_respawn()
 	return { success = true, data = { respawned = true } }
 end
 
+function CommandEngine:_validateTurn(payload)
+	local degrees = payload and payload.degrees
+	if typeof(degrees) ~= "number" then
+		return false, "param 'degrees' must be an integer"
+	end
+	if degrees % 1 ~= 0 then
+		return false, "param 'degrees' must be an integer"
+	end
+	if degrees < 1 or degrees > 360 then
+		return false, "param 'degrees' out of range [1, 360]"
+	end
+	return true, degrees
+end
+
+function CommandEngine:_turn(degrees, direction)
+	local ok, value = self:_validateTurn({ degrees = degrees })
+	if not ok then
+		return { success = false, error = value }
+	end
+
+	local hrp = self:_getHrp()
+	if not hrp then
+		return { success = false, error = "HumanoidRootPart not found" }
+	end
+
+	if self:_isCancelled() then
+		return { success = false, error = "cancelled" }
+	end
+
+	local sign = direction == "left" and 1 or -1
+	local angle = math.rad(value * sign)
+	hrp.CFrame = hrp.CFrame * CFrame.Angles(0, angle, 0)
+
+	local _, yaw, _ = hrp.CFrame:ToEulerAnglesYXZ()
+	return {
+		success = true,
+		data = {
+			direction = direction,
+			degrees = value,
+			newYaw = math.round(math.deg(yaw) * 10) / 10,
+		},
+	}
+end
+
+function CommandEngine:_turnLeft(payload)
+	return self:_turn(payload and payload.degrees, "left")
+end
+
+function CommandEngine:_turnRight(payload)
+	return self:_turn(payload and payload.degrees, "right")
+end
+
 function CommandEngine:_cancelCurrent()
 	self:requestCancel()
 	return { success = true, data = { cancelledCommandId = self.currentCommandId } }
@@ -378,6 +456,10 @@ function CommandEngine:execute(command)
 		result = self:_pause(payload)
 	elseif name == "respawn" then
 		result = self:_respawn()
+	elseif name == "turn_left" then
+		result = self:_turnLeft(payload)
+	elseif name == "turn_right" then
+		result = self:_turnRight(payload)
 	elseif name == "join_private_server" then
 		result = self:_joinPrivateServer(payload)
 	elseif name == "cancel" then
