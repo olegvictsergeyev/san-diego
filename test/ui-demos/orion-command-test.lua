@@ -78,6 +78,10 @@ local function buildUI()
 		runCommand("pause", { duration = 3 })
 	end)
 
+	tab:TextButton("Respawn", "Умереть и возродиться", function()
+		runCommand("respawn", {})
+	end)
+
 	tab:TextButton("Cancel", "Отменить текущую команду", function()
 		runCommand("cancel", {})
 	end)
