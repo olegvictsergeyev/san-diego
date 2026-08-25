@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.2.6",
+    version = "0.4.2",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -41,13 +41,21 @@ local CONFIG = {
         agent = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/agent.lua",
         private_server = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/private_server.lua",
         popup_closer = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/popup_closer.lua",
+        compat = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/compat.lua",
+        disconnect_watcher = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/disconnect_watcher.lua",
     },
+
+    -- URL загрузчика для перезапуска после телепорта
+    agentLoaderUrl = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/final/agent.lua",
 
     -- true при запуске через loadstring (script == nil), иначе false
     useRemoteModules = (script == nil),
 
     -- true — показать панель Orion; false — запустить агента сразу
     showUI = true,
+
+    -- true — автоматически нажимать Reconnect при ошибке 277
+    autoReconnectOnDisconnect = true,
 }
 
 local function loadModule(name)
@@ -73,19 +81,36 @@ local HttpClient = loadModule("http_client")
 local StateCollector = loadModule("state_collector")
 local PrivateServer = loadModule("private_server")
 local PopupCloser = loadModule("popup_closer")
+local Compat = loadModule("compat")
+local DisconnectWatcher = loadModule("disconnect_watcher")
 local CommandEngine = loadModule("command_engine")
 local Agent = loadModule("agent")
 
+print("[SanDiegoAgent][UI] modules loaded, version", CONFIG.version)
+
 local currentAgent = nil
 local stateReader = StateCollector.new(CONFIG.balancePath, CONFIG.version)
-local popupCloser = PopupCloser.new()
+local popupCloser = PopupCloser.new(Compat)
 
 local function makeAgent()
     local http = HttpClient.new(CONFIG.baseUrl)
     local state = StateCollector.new(CONFIG.balancePath, CONFIG.version)
-    local privateServer = PrivateServer.new()
+    local privateServer = PrivateServer.new({
+        loaderUrl = CONFIG.agentLoaderUrl,
+        compat = Compat,
+    })
     local engine = CommandEngine.new(privateServer)
     return Agent.new(CONFIG, http, state, engine)
+end
+
+local function startWatcher()
+    if not currentAgent then
+        return
+    end
+    local watcher = DisconnectWatcher.new(currentAgent, Compat, {
+        autoReconnect = CONFIG.autoReconnectOnDisconnect,
+    })
+    watcher:start()
 end
 
 local function startAgent()
@@ -95,6 +120,7 @@ local function startAgent()
     end
     currentAgent = makeAgent()
     currentAgent:start()
+    startWatcher()
 end
 
 local function stopAgent()
@@ -125,14 +151,8 @@ local function getCoord(axis)
 end
 
 local function copyToClipboard(text)
-    local ok = pcall(function()
-        setclipboard(tostring(text))
-    end)
-    if ok then
-        print("[SanDiegoAgent][UI] Скопировано:", text)
-    else
-        print("[SanDiegoAgent][UI] Clipboard недоступен. Значение:", text)
-    end
+    Compat.setClipboard(text)
+    print("[SanDiegoAgent][UI] Скопировано:", text)
 end
 
 local function loadOrion()
@@ -147,6 +167,7 @@ local function loadOrion()
 end
 
 local function findMainPage(gui)
+    if not gui then return nil end
     for _, desc in ipairs(gui:GetDescendants()) do
         if desc.Name == "newPageГлавное" then
             return desc
@@ -156,7 +177,7 @@ local function findMainPage(gui)
 end
 
 local function updateInfoLabels()
-    local gui = game.CoreGui:FindFirstChild("San Diego Agent")
+    local gui = Compat.gethui():FindFirstChild("San Diego Agent")
     if not gui then return end
     local page = findMainPage(gui)
     if not page then return end
@@ -183,8 +204,10 @@ local function updateInfoLabels()
 end
 
 local function buildUI()
+    print("[SanDiegoAgent][UI] buildUI started")
     local Orion = loadOrion()
     if not Orion then
+        warn("[SanDiegoAgent][UI] buildUI aborted: Orion not loaded")
         return
     end
 
@@ -231,6 +254,7 @@ end
 local UIPanel = {}
 
 function UIPanel.run()
+    print("[SanDiegoAgent][UI] UIPanel.run started")
     getgenv().StopSanDiegoAgent = false
 
     if CONFIG.showUI then

@@ -38,7 +38,8 @@
 7. **Протестировать**:
    - Вручную через executor.
    - Через backend (`POST /commands/{id}/result` должен получить корректный JSON-строку).
-   - После телепорта/респавна убедиться, что агент перезапускается (если используется autoexec).
+   - После телепорта/респавна убедиться, что агент перезапускается (используется `queue_on_teleport`).
+   - При ошибке 277 (дисконнект) должен отправляться лог в `custom_data.disconnect` и, если включено, нажиматься кнопка Reconnect.
 
 ## 2. При изменении backend-контракта
 
@@ -58,3 +59,23 @@
 2. Клики по внутриигровым кнопкам выполнять через `getconnections` и `pcall`; сетевые обработчики запускать в `task.spawn`, чтобы не блокировать основной поток.
 3. Не хранить секреты в коде.
 4. Перед git-коммитом убедиться, что все изменённые файлы синхронизированы.
+
+## 5. Совместимость экзекьюторов
+
+- **Целевые экзекьюторы:** Xeno и Delta. Всё производственное обязано работать на их общем подмножестве API.
+- **Разработка и отладка** ведутся в **Isaeva** — его специфичные функции нельзя использовать в продакшен-коде без fallback.
+- Проверенные на Isaeva возможности, которые безопасно использовать (если поддерживаются Xeno/Delta):
+  - `loadstring`, `game:HttpGet`, `request`, `http_request`
+  - `getconnections`, `fireclickdetector`, `firetouchinterest`
+  - `setclipboard`, `gethui`
+  - `queue_on_teleport` (глобальная)
+  - `hookmetamethod`, `hookfunction`, `getrawmetatable`, `setreadonly`
+  - файловые операции: `makefolder`, `writefile`, `readfile`, `listfiles`, `isfolder`, `isfile`, `delfile`, `delfolder`
+  - `getgc`, `getinstances`, `getnilinstances`
+  - `gethiddenproperty`, `sethiddenproperty`, `getsenv`, `getmenv`, `getreg`, `gettenv`
+  - `checkcaller`, `islclosure`, `dumpstring`, `decompile`, `saveinstance`
+  - `messagebox`, `rconsoleprint`/`rconsolewarn`/`rconsoleerr`, `consolecreate`/`consoledestroy`/`consoleprint`
+  - `Drawing`, `WebSocket`, `crypt.base64encode`
+- **Нельзя полагаться** на библиотеки-таблицы экзекьюторов (`syn`, `xeno`, `delta`, `issaeva`, `fluxus`, `hydrogen`, `codex`, `oxygen`, `krnl`) — в Isaeva они `nil`.
+- Для пережития телепорта используем глобальный `queue_on_teleport`, чтобы перезапустить загрузчик `final/agent.lua`. Если `queue_on_teleport` недоступен — полагаться на `autoexec`.
+- UI-элементы агента прятать в `gethui()` при наличии, иначе в `CoreGui`.

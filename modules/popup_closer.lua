@@ -7,13 +7,19 @@ local POPUPS = {
 	StarterPackGui = {
 		closePath = { "Frame", "TopFrame", "CloseButton", "Button" },
 	},
+	ChangelogGui = {
+		closePath = { "Frame", "TopFrame", "CloseButton", "Button" },
+	},
 	CustomServerHintGui = {
 		closePath = { "Frame", "CloseButton" },
 	},
+	TutorialUI = {},
 }
 
-function PopupCloser.new()
-	return setmetatable({}, PopupCloser)
+function PopupCloser.new(compat)
+	return setmetatable({
+		compat = compat,
+	}, PopupCloser)
 end
 
 function PopupCloser:_find(root, path)
@@ -31,8 +37,9 @@ function PopupCloser:_click(btn)
 	if not btn then
 		return false
 	end
-	if getconnections then
-		for _, conn in ipairs(getconnections(btn.MouseButton1Click)) do
+	local getConn = self.compat and self.compat.getConnections or getconnections
+	if getConn then
+		for _, conn in ipairs(getConn(btn.MouseButton1Click)) do
 			pcall(conn.Function)
 		end
 		return true

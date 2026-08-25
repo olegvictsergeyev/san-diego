@@ -44,6 +44,16 @@ function Agent:_sendStatus()
 	end
 end
 
+function Agent:reportDisconnect(info)
+	if not info then
+		return
+	end
+	self:_log("WARN", "disconnect detected:", tostring(info.title), tostring(info.code))
+	self.config.customData.disconnect = info
+	self:_sendStatus()
+	self.config.customData.disconnect = nil
+end
+
 function Agent:_updateCommandStatus(commandId, status, message)
 	if not commandId then return end
 	local body = { status = status }
