@@ -145,6 +145,35 @@ function CommandEngine:getCommandsSpec()
 	}
 end
 
+function CommandEngine:getCommandsResponse()
+	local spec = self:getCommandsSpec()
+	local response = {}
+	for _, cmd in ipairs(spec) do
+		if cmd.name ~= "get_commands" then
+			local params = {}
+			for paramName, paramInfo in pairs(cmd.params or {}) do
+				local pType = paramInfo.type
+				if pType == "integer" then
+					pType = "number"
+				end
+				local mappedParam = { type = pType }
+				if paramInfo.min ~= nil then
+					mappedParam.min = paramInfo.min
+				end
+				if paramInfo.max ~= nil then
+					mappedParam.max = paramInfo.max
+				end
+				params[paramName] = mappedParam
+			end
+			table.insert(response, {
+				name = cmd.name,
+				params = params,
+			})
+		end
+	end
+	return { commands = response }
+end
+
 function CommandEngine:_validateMove(payload, axis)
 	-- Поддерживаем как payload.value, так и payload.x / payload.y / payload.z.
 	local value = payload and (payload.value or (axis and payload[axis]))
@@ -288,7 +317,7 @@ function CommandEngine:execute(command)
 
 	local result
 	if name == "get_commands" then
-		result = { success = true, data = { commands = self:getCommandsSpec() } }
+		result = { success = true, data = self:getCommandsResponse() }
 	elseif name == "move_x" then
 		result = self:_moveAxis("x", payload)
 	elseif name == "move_y" then

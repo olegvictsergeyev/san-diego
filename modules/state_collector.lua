@@ -28,9 +28,10 @@ local function parseFormattedNumber(text)
 	return tonumber(s)
 end
 
-function StateCollector.new(balancePath)
+function StateCollector.new(balancePath, version)
 	local self = setmetatable({}, StateCollector)
 	self.balancePath = balancePath or ""
+	self.version = version or "0.0.0"
 	self._cachedBalancePath = nil
 	return self
 end
@@ -229,6 +230,7 @@ function StateCollector:getAll(custom)
 		nickname = self:getNickname(),
 		status = self:getStatus(),
 		balance = self:getBalance(),
+		version = self.version,
 		server_id = self:getServerId(),
 		place_id = self:getPlaceId(),
 		custom_data = customData,
