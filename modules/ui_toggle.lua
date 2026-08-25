@@ -135,6 +135,12 @@ function ToggleUI:toggle()
 	self:_setIconRotation(self.visible and 180 or 0, true)
 end
 
+function ToggleUI:collapse()
+	self.visible = false
+	self:setMainVisible(false)
+	self:_setIconRotation(0, true)
+end
+
 function ToggleUI:destroy()
 	if self.gui then
 		self.gui:Destroy()
@@ -185,7 +191,7 @@ function ToggleUI:_createCloseOverlay(btn)
 
 	local function onClick()
 		print("[SanDiegoAgent][ToggleUI] close overlay clicked")
-		self:toggle()
+		self:collapse()
 	end
 	overlay.MouseButton1Click:Connect(onClick)
 	overlay.Activated:Connect(onClick)
