@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.4.5",
+    version = "0.4.6",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -43,6 +43,7 @@ local CONFIG = {
         popup_closer = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/popup_closer.lua",
         compat = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/compat.lua",
         disconnect_watcher = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/disconnect_watcher.lua",
+        ui_toggle = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/ui_toggle.lua",
     },
 
     -- URL загрузчика для перезапуска после телепорта
@@ -83,12 +84,14 @@ local PrivateServer = loadModule("private_server")
 local PopupCloser = loadModule("popup_closer")
 local Compat = loadModule("compat")
 local DisconnectWatcher = loadModule("disconnect_watcher")
+local ToggleUI = loadModule("ui_toggle")
 local CommandEngine = loadModule("command_engine")
 local Agent = loadModule("agent")
 
 print("[SanDiegoAgent][UI] modules loaded, version", CONFIG.version)
 
 local currentAgent = nil
+local currentMainGui = nil
 local stateReader = StateCollector.new(CONFIG.balancePath, CONFIG.version)
 local popupCloser = PopupCloser.new(Compat)
 
@@ -176,8 +179,22 @@ local function findMainPage(gui)
     return nil
 end
 
+local function findOrionGui()
+    local hui = Compat.gethui()
+    for _, sg in ipairs(hui:GetChildren()) do
+        if sg:IsA("ScreenGui") then
+            for _, desc in ipairs(sg:GetDescendants()) do
+                if desc:IsA("TextLabel") and desc.Text == "San Diego Agent" then
+                    return sg
+                end
+            end
+        end
+    end
+    return nil
+end
+
 local function updateInfoLabels()
-    local gui = Compat.gethui():FindFirstChild("San Diego Agent")
+    local gui = currentMainGui
     if not gui then return end
     local page = findMainPage(gui)
     if not page then return end
@@ -212,6 +229,17 @@ local function buildUI()
     end
 
     local window = Orion:CreateOrion("San Diego Agent")
+    currentMainGui = findOrionGui()
+
+    if currentMainGui then
+        ToggleUI.new(currentMainGui, {
+            parent = Compat.gethui(),
+            initialVisible = false,
+        })
+    else
+        warn("[SanDiegoAgent][UI] Orion ScreenGui not found, toggle will not be created")
+    end
+
     local tabMain = window:CreateSection("Главное")
 
     local pos = getPosition()
