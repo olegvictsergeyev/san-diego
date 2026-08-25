@@ -145,8 +145,9 @@ function CommandEngine:getCommandsSpec()
 	}
 end
 
-function CommandEngine:_validateMove(payload)
-	local value = payload and payload.value
+function CommandEngine:_validateMove(payload, axis)
+	-- Поддерживаем как payload.value, так и payload.x / payload.y / payload.z.
+	local value = payload and (payload.value or (axis and payload[axis]))
 	if typeof(value) ~= "number" then
 		return false, "param 'value' must be an integer"
 	end
@@ -160,7 +161,7 @@ function CommandEngine:_validateMove(payload)
 end
 
 function CommandEngine:_moveAxis(axis, payload)
-	local ok, value = self:_validateMove(payload)
+	local ok, value = self:_validateMove(payload, axis)
 	if not ok then
 		return { success = false, error = value }
 	end

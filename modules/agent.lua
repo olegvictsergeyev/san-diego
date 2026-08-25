@@ -62,7 +62,7 @@ end
 
 function Agent:_sendCommandResult(commandId, result)
 	if not commandId then return end
-	local ok, res = self.http:post("/commands/" .. tostring(commandId) .. "/result", result)
+	local ok, res = self.http:post("/commands/" .. tostring(commandId) .. "/result", { result = result })
 	if ok then
 		self:_log("INFO", "command result sent", commandId, res.statusCode)
 	else
