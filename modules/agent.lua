@@ -64,6 +64,9 @@ function Agent:_resultToString(result)
 		return result
 	end
 	if typeof(result) == "table" then
+		if typeof(result.encoded) == "string" then
+			return result.encoded
+		end
 		if result.data ~= nil then
 			local ok, encoded = pcall(function()
 				return HttpService:JSONEncode(result.data)

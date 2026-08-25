@@ -168,33 +168,51 @@ function CommandEngine:getCommandsSpec()
 	}
 end
 
+function CommandEngine:_mapCommandSpec(cmd)
+	local params = {}
+	for paramName, paramInfo in pairs(cmd.params or {}) do
+		local pType = paramInfo.type
+		if pType == "integer" then
+			pType = "number"
+		end
+		local mappedParam = { type = pType }
+		if paramInfo.min ~= nil then
+			mappedParam.min = paramInfo.min
+		end
+		if paramInfo.max ~= nil then
+			mappedParam.max = paramInfo.max
+		end
+		params[paramName] = mappedParam
+	end
+	return {
+		name = cmd.name,
+		params = params,
+	}
+end
+
 function CommandEngine:getCommandsResponse()
 	local spec = self:getCommandsSpec()
 	local response = {}
 	for _, cmd in ipairs(spec) do
 		if cmd.name ~= "get_commands" then
-			local params = {}
-			for paramName, paramInfo in pairs(cmd.params or {}) do
-				local pType = paramInfo.type
-				if pType == "integer" then
-					pType = "number"
-				end
-				local mappedParam = { type = pType }
-				if paramInfo.min ~= nil then
-					mappedParam.min = paramInfo.min
-				end
-				if paramInfo.max ~= nil then
-					mappedParam.max = paramInfo.max
-				end
-				params[paramName] = mappedParam
-			end
-			table.insert(response, {
-				name = cmd.name,
-				params = params,
-			})
+			table.insert(response, self:_mapCommandSpec(cmd))
 		end
 	end
 	return { commands = response }
+end
+
+function CommandEngine:_encodeGetCommandsResult()
+	local response = self:getCommandsResponse()
+	local HttpService = game:GetService("HttpService")
+	local ok, json = pcall(function()
+		return HttpService:JSONEncode(response)
+	end)
+	if not ok then
+		return nil
+	end
+	-- Roblox HttpService кодирует пустую таблицу как [], а бэкенд требует {}.
+	json = json:gsub('"params":%[%]', '"params":{}')
+	return json
 end
 
 function CommandEngine:_validateMove(payload, axis)
@@ -348,7 +366,8 @@ function CommandEngine:execute(command)
 
 	local result
 	if name == "get_commands" then
-		result = { success = true, data = self:getCommandsResponse() }
+		local encoded = self:_encodeGetCommandsResult()
+		result = { success = true, encoded = encoded or "{\"commands\":[]}" }
 	elseif name == "move_x" then
 		result = self:_moveAxis("x", payload)
 	elseif name == "move_y" then
