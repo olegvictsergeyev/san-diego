@@ -16,7 +16,12 @@ local function pathOf(obj)
 end
 
 local function findOrionGui()
-	for _, root in ipairs({ CoreGui }) do
+	local roots = { game.CoreGui }
+	local hui = gethui and gethui() or nil
+	if hui then
+		table.insert(roots, hui)
+	end
+	for _, root in ipairs(roots) do
 		for _, sg in ipairs(root:GetChildren()) do
 			if sg:IsA("ScreenGui") then
 				if sg.Name == "San Diego Agent" then
@@ -38,6 +43,20 @@ log("===== ORION CLOSE BUTTON DUMP =====")
 local gui = findOrionGui()
 if not gui then
 	log("Orion ScreenGui not found")
+	log("All ScreenGuis in CoreGui:")
+	for _, sg in ipairs(CoreGui:GetChildren()) do
+		if sg:IsA("ScreenGui") then
+			log("  " .. sg.Name)
+		end
+	end
+	if hui then
+		log("All ScreenGuis in gethui():")
+		for _, sg in ipairs(hui:GetChildren()) do
+			if sg:IsA("ScreenGui") then
+				log("  " .. sg.Name)
+			end
+		end
+	end
 else
 	log("Orion ScreenGui: " .. gui.Name)
 	for _, desc in ipairs(gui:GetDescendants()) do
@@ -46,9 +65,8 @@ else
 			if desc:IsA("TextButton") then
 				info = info .. " | Text=\"" .. tostring(desc.Text) .. "\""
 			end
-			if desc:IsA("ImageButton") or desc:FindFirstChildOfClass("ImageLabel") then
-				local img = desc:IsA("ImageButton") and desc.Image or nil
-				info = info .. " | Image=" .. tostring(img or "")
+			if desc:IsA("ImageButton") then
+				info = info .. " | Image=" .. tostring(desc.Image or "")
 			end
 			info = info .. " | Size=" .. tostring(desc.Size) .. " | Pos=" .. tostring(desc.Position) .. " | ZIndex=" .. tostring(desc.ZIndex)
 			log(info)
