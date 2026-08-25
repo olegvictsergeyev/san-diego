@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.4.4",
+    version = "0.4.5",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -59,7 +59,7 @@ local CONFIG = {
 }
 
 local function loadModule(name)
-    if CONFIG.useRemoteModules then
+    if CONFIG.useRemoteModules or not script or typeof(script) ~= "Instance" or not script.Parent then
         local url = CONFIG.moduleUrls[name]
         if not url then
             error("module URL not configured: " .. tostring(name))

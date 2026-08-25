@@ -11,7 +11,7 @@
 local UI_PANEL_URL = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/modules/ui_panel.lua?nocache=" .. tostring(tick())
 
 local function loadUiPanel()
-    if script then
+    if script and typeof(script) == "Instance" and script.Parent then
         -- Локальный запуск: require из папки modules
         return require(script.Parent:WaitForChild("modules"):WaitForChild("ui_panel"))
     else
