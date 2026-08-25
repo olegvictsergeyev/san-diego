@@ -16,6 +16,7 @@ function ToggleUI.new(mainGui, options)
 	self:_createGui()
 	self:_setIconRotation(self.visible and 180 or 0, false)
 	self:setMainVisible(self.visible)
+	self:_bindCloseButton()
 	return self
 end
 
@@ -138,6 +139,42 @@ function ToggleUI:destroy()
 	if self.gui then
 		self.gui:Destroy()
 	end
+end
+
+function ToggleUI:_findCloseButton()
+	if not self.mainGui then
+		return nil
+	end
+	local closeTexts = { ["×"] = true, ["x"] = true, ["X"] = true, ["✕"] = true, ["✖"] = true, ["Close"] = true }
+	local closeNames = { ["Close"] = true, ["Exit"] = true, ["X"] = true, ["CloseButton"] = true, ["ExitButton"] = true }
+	for _, desc in ipairs(self.mainGui:GetDescendants()) do
+		if desc:IsA("TextButton") or desc:IsA("ImageButton") then
+			if closeNames[desc.Name] then
+				return desc
+			end
+			if desc:IsA("TextButton") and closeTexts[desc.Text] then
+				return desc
+			end
+		end
+	end
+	return nil
+end
+
+function ToggleUI:_bindCloseButton()
+	local btn = self:_findCloseButton()
+	if not btn then
+		return
+	end
+	if typeof(getconnections) == "function" then
+		for _, conn in ipairs(getconnections(btn.MouseButton1Click)) do
+			if typeof(conn.Enabled) == "boolean" then
+				conn.Enabled = false
+			end
+		end
+	end
+	btn.MouseButton1Click:Connect(function()
+		self:toggle()
+	end)
 end
 
 return ToggleUI
