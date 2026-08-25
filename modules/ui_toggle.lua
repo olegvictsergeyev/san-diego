@@ -145,14 +145,14 @@ function ToggleUI:_findCloseButton()
 	if not self.mainGui then
 		return nil
 	end
-	local closeTexts = { ["×"] = true, ["x"] = true, ["X"] = true, ["✕"] = true, ["✖"] = true, ["Close"] = true }
-	local closeNames = { ["Close"] = true, ["Exit"] = true, ["X"] = true, ["CloseButton"] = true, ["ExitButton"] = true }
+	local closeTexts = { ["×"] = true, ["x"] = true, ["X"] = true, ["✕"] = true, ["✖"] = true, ["Close"] = true, ["CLOSE"] = true }
+	local closeNames = { ["Close"] = true, ["Exit"] = true, ["X"] = true, ["CloseButton"] = true, ["ExitButton"] = true, ["close"] = true }
 	for _, desc in ipairs(self.mainGui:GetDescendants()) do
 		if desc:IsA("TextButton") or desc:IsA("ImageButton") then
-			if closeNames[desc.Name] then
+			if closeNames[desc.Name] or closeNames[desc.Name:lower()] then
 				return desc
 			end
-			if desc:IsA("TextButton") and closeTexts[desc.Text] then
+			if desc:IsA("TextButton") and (closeTexts[desc.Text] or closeTexts[desc.Text:lower()]) then
 				return desc
 			end
 		end
@@ -160,21 +160,49 @@ function ToggleUI:_findCloseButton()
 	return nil
 end
 
+function ToggleUI:_createCloseOverlay(btn)
+	local parent = btn.Parent
+	if not parent then
+		return
+	end
+	local overlay = Instance.new("TextButton")
+	overlay.Name = "CloseOverlay"
+	overlay.Size = btn.Size
+	overlay.Position = btn.Position
+	overlay.AnchorPoint = btn.AnchorPoint
+	overlay.BackgroundTransparency = 1
+	overlay.Text = ""
+	overlay.ZIndex = btn.ZIndex + 10
+	overlay.Parent = parent
+
+	overlay.MouseButton1Click:Connect(function()
+		self:toggle()
+	end)
+end
+
 function ToggleUI:_bindCloseButton()
 	local btn = self:_findCloseButton()
 	if not btn then
+		print("[SanDiegoAgent][ToggleUI] close button not found")
 		return
 	end
+	print("[SanDiegoAgent][ToggleUI] close button found:", btn.Name, "class:", btn.ClassName, "text:", btn:IsA("TextButton") and btn.Text or "")
+
 	if typeof(getconnections) == "function" then
-		for _, conn in ipairs(getconnections(btn.MouseButton1Click)) do
+		local conns = getconnections(btn.MouseButton1Click)
+		print("[SanDiegoAgent][ToggleUI] close button connections:", #conns)
+		for _, conn in ipairs(conns) do
 			if typeof(conn.Enabled) == "boolean" then
 				conn.Enabled = false
 			end
 		end
 	end
+
 	btn.MouseButton1Click:Connect(function()
 		self:toggle()
 	end)
+
+	self:_createCloseOverlay(btn)
 end
 
 return ToggleUI
