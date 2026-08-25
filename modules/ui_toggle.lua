@@ -146,13 +146,17 @@ function ToggleUI:_findCloseButton()
 		return nil
 	end
 	local closeTexts = { ["×"] = true, ["x"] = true, ["X"] = true, ["✕"] = true, ["✖"] = true, ["Close"] = true, ["CLOSE"] = true }
-	local closeNames = { ["Close"] = true, ["Exit"] = true, ["X"] = true, ["CloseButton"] = true, ["ExitButton"] = true, ["close"] = true }
+	local closeImages = { ["rbxassetid://4988112250"] = true }
 	for _, desc in ipairs(self.mainGui:GetDescendants()) do
 		if desc:IsA("TextButton") or desc:IsA("ImageButton") then
-			if closeNames[desc.Name] or closeNames[desc.Name:lower()] then
+			local nameLower = desc.Name:lower()
+			if nameLower:find("close") or nameLower:find("exit") then
 				return desc
 			end
 			if desc:IsA("TextButton") and (closeTexts[desc.Text] or closeTexts[desc.Text:lower()]) then
+				return desc
+			end
+			if desc:IsA("ImageButton") and closeImages[desc.Image] then
 				return desc
 			end
 		end
