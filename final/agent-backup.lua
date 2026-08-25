@@ -1,16 +1,21 @@
 local function httpGet(url)
-	local ok, body = pcall(function()
+	local ok, res = pcall(function()
 		local req = request or http_request
 		if req then
-			local res = req({ Url = url, Method = "GET", Headers = { ["Cache-Control"] = "no-cache" } })
-			return res and res.Body
+			return req({ Url = url, Method = "GET", Headers = { ["Cache-Control"] = "no-cache" } })
 		end
-		return game:HttpGet(url)
+		return { Body = game:HttpGet(url) }
 	end)
-	if ok then
-		return body
+	if not ok then
+		print("[SanDiegoAgent][Backup] httpGet error:", tostring(res))
+		return nil
 	end
-	return nil
+	local body = res and (res.Body or res.body)
+	if not body or body == "" then
+		print("[SanDiegoAgent][Backup] empty body for", url)
+		return nil
+	end
+	return body
 end
 
 local function getLatestCommitSha()
@@ -35,9 +40,15 @@ end
 getgenv().SanDiegoAgentBaseUrl = baseUrl
 
 local loaderUrl = baseUrl .. "/final/agent.lua?nocache=" .. tostring(tick())
+print("[SanDiegoAgent][Backup] loading", loaderUrl)
 local source = httpGet(loaderUrl)
 if source then
-	loadstring(source, "agent")()
+	local fn, err = loadstring(source, "agent")
+	if fn then
+		fn()
+	else
+		warn("[SanDiegoAgent][Backup] loadstring failed: " .. tostring(err))
+	end
 else
 	warn("[SanDiegoAgent][Backup] failed to load agent from " .. loaderUrl)
 end
