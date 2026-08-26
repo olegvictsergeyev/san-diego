@@ -63,6 +63,20 @@ function DisconnectWatcher:_readErrorInfo()
 	}
 end
 
+function DisconnectWatcher:_shouldReconnect(info)
+	if not info then
+		return false
+	end
+	local title = (info.title or ""):lower()
+	if title:find("disconnect") then
+		return true
+	end
+	if info.code == "277" or info.code == "278" then
+		return true
+	end
+	return false
+end
+
 function DisconnectWatcher:_getButton(name)
 	local prompt = self:_getErrorPrompt()
 	if not prompt then
@@ -148,10 +162,8 @@ end
 function DisconnectWatcher:_onPromptShown()
 	local info = self:_readErrorInfo()
 	if not info then
-		self:_log("prompt shown but could not read error info")
 		return
 	end
-	self:_log("detected error", info.title or "?", info.code or "?")
 	if self.agent and self.agent.reportDisconnect then
 		pcall(function()
 			self.agent:reportDisconnect(info)
@@ -161,10 +173,14 @@ function DisconnectWatcher:_onPromptShown()
 		return
 	end
 	self.handled = true
+
+	if not self:_shouldReconnect(info) then
+		return
+	end
+
 	self:_queueReload()
 
 	if self.opts.autoReconnect then
-		self:_log("autoReconnect enabled, clicking Reconnect")
 		task.spawn(function()
 			task.wait(0.5)
 			self:clickReconnect()
