@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.5.0",
+    version = "0.5.1",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -113,6 +113,7 @@ local function startWatcher()
     end
     local watcher = DisconnectWatcher.new(currentAgent, Compat, {
         autoReconnect = CONFIG.autoReconnectOnDisconnect,
+        loaderUrl = CONFIG.agentLoaderUrl,
     })
     watcher:start()
 end

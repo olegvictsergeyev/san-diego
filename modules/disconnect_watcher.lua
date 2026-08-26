@@ -9,6 +9,7 @@ function DisconnectWatcher.new(agent, compat, opts)
 		agent = agent,
 		compat = compat,
 		opts = opts or {},
+		loaderUrl = opts and opts.loaderUrl,
 		watching = false,
 		handled = false,
 	}, DisconnectWatcher)
@@ -128,6 +129,22 @@ function DisconnectWatcher:_fireButton(btn)
 	return fired
 end
 
+function DisconnectWatcher:_queueReload()
+	if not self.loaderUrl then
+		return
+	end
+	local baseUrl = tostring(self.loaderUrl):match("(.+)/final/agent%.lua$") or self.loaderUrl
+	local code = 'local baseUrl = "' .. baseUrl .. '"\ngetgenv().SanDiegoAgentBaseUrl = baseUrl\nloadstring(game:HttpGet(baseUrl .. "/final/agent.lua?nocache=" .. tostring(tick())))()'
+	if self.compat and self.compat.queueOnTeleport then
+		self.compat.queueOnTeleport(code)
+	else
+		local q = queue_on_teleport
+		if typeof(q) == "function" then
+			pcall(q, code)
+		end
+	end
+end
+
 function DisconnectWatcher:_onPromptShown()
 	local info = self:_readErrorInfo()
 	if not info then
@@ -144,22 +161,7 @@ function DisconnectWatcher:_onPromptShown()
 		return
 	end
 	self.handled = true
-
-	local prompt = self:_getErrorPrompt()
-	if prompt then
-		local function onGone()
-			if not prompt:IsDescendantOf(game) or not prompt.Visible then
-				self:_log("prompt cleared")
-				if self.agent and self.agent.clearDisconnect then
-					pcall(function()
-						self.agent:clearDisconnect()
-					end)
-				end
-			end
-		end
-		prompt:GetPropertyChangedSignal("Visible"):Connect(onGone)
-		prompt.AncestryChanged:Connect(onGone)
-	end
+	self:_queueReload()
 
 	if self.opts.autoReconnect then
 		self:_log("autoReconnect enabled, clicking Reconnect")
