@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.5.4",
+    version = "0.5.5",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -46,6 +46,7 @@ local CONFIG = {
             compat = base .. "/modules/compat.lua",
             disconnect_watcher = base .. "/modules/disconnect_watcher.lua",
             ui_toggle = base .. "/modules/ui_toggle.lua",
+            autoexec = base .. "/modules/autoexec.lua",
         }
     end)(),
 
@@ -88,11 +89,13 @@ local PopupCloser = loadModule("popup_closer")
 local Compat = loadModule("compat")
 local DisconnectWatcher = loadModule("disconnect_watcher")
 local ToggleUI = loadModule("ui_toggle")
+local Autoexec = loadModule("autoexec")
 local CommandEngine = loadModule("command_engine")
 local Agent = loadModule("agent")
 
 local currentAgent = nil
 local currentMainGui = nil
+local autoexec = Autoexec.new()
 local stateReader = StateCollector.new(CONFIG.balancePath, CONFIG.version)
 local popupCloser = PopupCloser.new(Compat)
 
@@ -118,6 +121,15 @@ local function startWatcher()
     watcher:start()
 end
 
+local function installAutoexec()
+    local ok, path = pcall(function()
+        return autoexec:install(CONFIG.agentLoaderUrl)
+    end)
+    if not ok then
+        warn("[SanDiegoAgent][Autoexec] install error:", tostring(path))
+    end
+end
+
 local function startAgent()
     if currentAgent then
         currentAgent:stop()
@@ -126,6 +138,7 @@ local function startAgent()
     currentAgent = makeAgent()
     currentAgent:start()
     startWatcher()
+    installAutoexec()
 end
 
 local function stopAgent()
@@ -337,6 +350,7 @@ function UIPanel.run()
     else
         startAgent()
         popupCloser:start()
+        installAutoexec()
     end
 
     -- Фоновый поток для обработки флага остановки
