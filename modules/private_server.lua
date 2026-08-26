@@ -8,6 +8,7 @@ function PrivateServer.new(opts)
 	local self = setmetatable({}, PrivateServer)
 	self.loaderUrl = opts and opts.loaderUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/final/agent.lua"
 	self.compat = opts and opts.compat or nil
+	self.serverState = opts and opts.serverState or nil
 	return self
 end
 
@@ -80,6 +81,11 @@ function PrivateServer:joinByCode(code)
 	-- Запускаем в отдельном потоке, потому что успешный телепорт
 	-- может прервать выполнение текущего скрипта.
 	task.spawn(function()
+		if self.serverState then
+			pcall(function()
+				self.serverState:clear()
+			end)
+		end
 		self:_queueReload()
 		pcall(function()
 			joinRemote:InvokeServer(code)

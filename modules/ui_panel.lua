@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.6.1",
+    version = "0.7.0",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -47,6 +47,7 @@ local CONFIG = {
             disconnect_watcher = base .. "/modules/disconnect_watcher.lua",
             ui_toggle = base .. "/modules/ui_toggle.lua",
             autoexec = base .. "/modules/autoexec.lua",
+            server_state = base .. "/modules/server_state.lua",
         }
     end)(),
 
@@ -90,6 +91,7 @@ local Compat = loadModule("compat")
 local DisconnectWatcher = loadModule("disconnect_watcher")
 local ToggleUI = loadModule("ui_toggle")
 local Autoexec = loadModule("autoexec")
+local ServerState = loadModule("server_state")
 local CommandEngine = loadModule("command_engine")
 local Agent = loadModule("agent")
 
@@ -98,6 +100,40 @@ local currentMainGui = nil
 local autoexec = Autoexec.new()
 local stateReader = StateCollector.new(CONFIG.balancePath, CONFIG.version)
 local popupCloser = PopupCloser.new(Compat)
+local serverState = ServerState.new(Compat)
+
+local function ensureCorrectServer()
+	local saved = serverState:load()
+	if not saved then
+		return true
+	end
+
+	local currentJobId = tostring(game.JobId)
+	if saved.jobId == currentJobId then
+		serverState:clear()
+		return true
+	end
+
+	local placeId = tonumber(saved.placeId) or game.PlaceId
+	local jobId = tostring(saved.jobId)
+	warn("[SanDiegoAgent][ServerGuard] current server does not match saved " .. currentJobId .. ", teleporting to " .. jobId)
+
+	local loaderCode = 'getgenv().SanDiegoAgentBaseUrl = "' .. (getgenv().SanDiegoAgentBaseUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main") .. '"\nloadstring(game:HttpGet("' .. CONFIG.agentLoaderUrl .. '?nocache=" .. tostring(tick())))()'
+	Compat.queueOnTeleport(loaderCode)
+
+	local TeleportService = game:GetService("TeleportService")
+	local player = Players.LocalPlayer
+	local ok, err = pcall(function()
+		TeleportService:TeleportToPlaceInstance(placeId, jobId, player)
+	end)
+	if not ok then
+		warn("[SanDiegoAgent][ServerGuard] teleport failed: " .. tostring(err))
+		serverState:clear()
+		return true
+	end
+
+	return false
+end
 
 local function makeAgent()
     local http = HttpClient.new(CONFIG.baseUrl)
@@ -105,6 +141,7 @@ local function makeAgent()
     local privateServer = PrivateServer.new({
         loaderUrl = CONFIG.agentLoaderUrl,
         compat = Compat,
+        serverState = serverState,
     })
     local engine = CommandEngine.new(privateServer)
     return Agent.new(CONFIG, http, state, engine)
@@ -117,6 +154,7 @@ local function startWatcher()
     local watcher = DisconnectWatcher.new(currentAgent, Compat, {
         autoReconnect = CONFIG.autoReconnectOnDisconnect,
         loaderUrl = CONFIG.agentLoaderUrl,
+        serverState = serverState,
     })
     watcher:start()
 end
@@ -344,6 +382,11 @@ local UIPanel = {}
 
 function UIPanel.run()
     getgenv().StopSanDiegoAgent = false
+
+    if not ensureCorrectServer() then
+        print("[SanDiegoAgent][ServerGuard] waiting for teleport to previous server, agent not started")
+        return
+    end
 
     if CONFIG.showUI then
         buildUI()

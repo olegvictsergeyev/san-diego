@@ -63,6 +63,33 @@ function Compat.fireTouchInterest(part, toucher, toggle)
 	end
 end
 
+function Compat.makeFolder(path)
+	if typeof(makefolder) == "function" then
+		pcall(makefolder, path)
+	end
+end
+
+function Compat.writeFile(path, content)
+	if typeof(writefile) == "function" then
+		return pcall(writefile, path, content)
+	end
+	return false, "writefile not available"
+end
+
+function Compat.readFile(path)
+	if typeof(readfile) == "function" then
+		return pcall(readfile, path)
+	end
+	return false, "readfile not available"
+end
+
+function Compat.isFile(path)
+	if typeof(isfile) == "function" then
+		return pcall(isfile, path)
+	end
+	return false, false
+end
+
 function Compat.consolePrint(...)
 	if typeof(rconsoleprint) == "function" then
 		pcall(rconsoleprint, ...)

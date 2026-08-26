@@ -10,6 +10,7 @@ function DisconnectWatcher.new(agent, compat, opts)
 		compat = compat,
 		opts = opts or {},
 		loaderUrl = opts and opts.loaderUrl,
+		serverState = opts and opts.serverState,
 		watching = false,
 		handled = false,
 	}, DisconnectWatcher)
@@ -159,10 +160,25 @@ function DisconnectWatcher:_queueReload()
 	end
 end
 
+function DisconnectWatcher:_saveCurrentServer()
+	if not self.serverState then
+		return
+	end
+	local placeId = game.PlaceId
+	local jobId = game.JobId
+	local ok, err = pcall(function()
+		return self.serverState:save(placeId, jobId)
+	end)
+	self:_log("saved server", tostring(placeId), tostring(jobId), tostring(ok), tostring(err))
+end
+
 function DisconnectWatcher:_onPromptShown()
 	local info = self:_readErrorInfo()
 	if not info then
 		return
+	end
+	if self:_shouldReconnect(info) then
+		self:_saveCurrentServer()
 	end
 	if self.agent and self.agent.reportDisconnect then
 		pcall(function()
