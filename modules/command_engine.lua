@@ -434,7 +434,7 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera)
 
 	if withCamera and camera then
 		pcall(function()
-			camera.CameraType = Enum.CameraType.Scriptable
+			camera.CameraType = Enum.CameraType.Follow
 		end)
 	end
 
@@ -448,13 +448,6 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera)
 		local cf = CFrame.new(hrp.Position) * CFrame.Angles(0, newYaw, 0)
 		hrp.CFrame = cf
 
-		if withCamera and camera then
-			local look = cf.LookVector
-			pcall(function()
-				camera.CFrame = CFrame.new(hrp.Position - look * 10 + Vector3.new(0, 5, 0), hrp.Position + look * 10)
-			end)
-		end
-
 		if t >= 1 then
 			break
 		end
@@ -464,9 +457,7 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera)
 	hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, targetYaw, 0)
 
 	if withCamera and camera then
-		local look = hrp.CFrame.LookVector
 		pcall(function()
-			camera.CFrame = CFrame.new(hrp.Position - look * 10 + Vector3.new(0, 5, 0), hrp.Position + look * 10)
 			camera.CameraType = Enum.CameraType.Follow
 		end)
 	end
