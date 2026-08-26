@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.7.1",
+    version = "0.7.2",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -117,10 +117,10 @@ local function ensureCorrectServer()
 		return true
 	end
 
-	-- Игнорируем устаревшее сохранение (старше 5 минут), чтобы не телепортировать
+	-- Игнорируем устаревшее сохранение (старше 30 минут), чтобы не телепортировать
 	-- аккаунты, которые просто подключаются со старым файлом.
 	local savedAt = tonumber(saved.savedAt) or 0
-	if tick() - savedAt > 300 then
+	if tick() - savedAt > 1800 then
 		serverState:clear()
 		return true
 	end
