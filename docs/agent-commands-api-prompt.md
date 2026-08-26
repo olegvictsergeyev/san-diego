@@ -116,7 +116,8 @@ POST /commands/{id}/result
     {
       "name": "move_x",
       "params": {
-        "value": { "type": "number", "min": -7000, "max": 7000 }
+        "value": { "type": "number", "min": -7000, "max": 7000 },
+        "speed": { "type": "number", "min": 1, "max": 10 }
       }
     },
     {

@@ -101,6 +101,13 @@ function CommandEngine:getCommandsSpec()
 					max = 7000,
 					description = "Смещение по оси X в студиях",
 				},
+				speed = {
+					type = "integer",
+					required = false,
+					min = 1,
+					max = 10,
+					description = "Скорость перемещения: 10 — максимальная (по умолчанию), 1 — в 10 раз медленнее",
+				},
 			},
 		},
 		{
@@ -114,6 +121,13 @@ function CommandEngine:getCommandsSpec()
 					max = 7000,
 					description = "Смещение по оси Y в студиях",
 				},
+				speed = {
+					type = "integer",
+					required = false,
+					min = 1,
+					max = 10,
+					description = "Скорость перемещения: 10 — максимальная (по умолчанию), 1 — в 10 раз медленнее",
+				},
 			},
 		},
 		{
@@ -126,6 +140,13 @@ function CommandEngine:getCommandsSpec()
 					min = -7000,
 					max = 7000,
 					description = "Смещение по оси Z в студиях",
+				},
+				speed = {
+					type = "integer",
+					required = false,
+					min = 1,
+					max = 10,
+					description = "Скорость перемещения: 10 — максимальная (по умолчанию), 1 — в 10 раз медленнее",
 				},
 			},
 		},
@@ -253,11 +274,21 @@ function CommandEngine:_validateMove(payload, axis)
 	if value < -7000 or value > 7000 then
 		return false, "param 'value' out of range [-7000, 7000]"
 	end
-	return true, value
+
+	local speed = payload and payload.speed
+	if speed == nil then
+		speed = 10
+	elseif typeof(speed) ~= "number" or speed % 1 ~= 0 then
+		return false, "param 'speed' must be an integer"
+	elseif speed < 1 or speed > 10 then
+		return false, "param 'speed' out of range [1, 10]"
+	end
+
+	return true, value, speed
 end
 
 function CommandEngine:_moveAxis(axis, payload)
-	local ok, value = self:_validateMove(payload, axis)
+	local ok, value, speed = self:_validateMove(payload, axis)
 	if not ok then
 		return { success = false, error = value }
 	end
@@ -275,17 +306,21 @@ function CommandEngine:_moveAxis(axis, payload)
 	local startValue = pos[axis]
 	local sign = value >= 0 and 1 or -1
 
-	-- Шаги взяты из реального поведения игры San Diego:
-	-- X/Z: 20 студий за шаг, пауза 0.1 с.
-	-- Y: 100 студий за шаг, пауза 0.5 с.
-	local stepSize, waitTime
+	-- Базовые шаги подобраны для плавности (max speed = прежняя скорость):
+	-- X/Z: 4 студии за шаг, пауза 0.02 с.
+	-- Y: 20 студий за шаг, пауза 0.1 с.
+	-- speed 1..10 масштабирует только длину шага, поэтому min в 10 раз медленнее.
+	local baseStep, baseWait
 	if axis == "y" then
-		stepSize = 100 * sign
-		waitTime = 0.5
+		baseStep = 20
+		baseWait = 0.1
 	else
-		stepSize = 20 * sign
-		waitTime = 0.1
+		baseStep = 4
+		baseWait = 0.02
 	end
+
+	local stepSize = baseStep * sign * (speed / 10)
+	local waitTime = baseWait
 
 	local steps = math.floor(math.abs(value) / math.abs(stepSize))
 	local current = startValue
