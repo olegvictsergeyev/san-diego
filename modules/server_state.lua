@@ -3,11 +3,12 @@ local HttpService = game:GetService("HttpService")
 local ServerState = {}
 ServerState.__index = ServerState
 
-function ServerState.new(compat)
+function ServerState.new(compat, nickname)
+	local suffix = nickname and nickname ~= "" and ("-" .. nickname) or ""
 	return setmetatable({
 		compat = compat,
 		folder = "SanDiegoAgent",
-		file = "SanDiegoAgent/last-server.json",
+		file = "SanDiegoAgent/last-server" .. suffix .. ".json",
 	}, ServerState)
 end
 

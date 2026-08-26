@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.7.0",
+    version = "0.7.1",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -100,7 +100,10 @@ local currentMainGui = nil
 local autoexec = Autoexec.new()
 local stateReader = StateCollector.new(CONFIG.balancePath, CONFIG.version)
 local popupCloser = PopupCloser.new(Compat)
-local serverState = ServerState.new(Compat)
+local serverState = ServerState.new(Compat, Players.LocalPlayer and Players.LocalPlayer.Name)
+
+local coreStarted = false
+local runCore
 
 local function ensureCorrectServer()
 	local saved = serverState:load()
@@ -110,6 +113,14 @@ local function ensureCorrectServer()
 
 	local currentJobId = tostring(game.JobId)
 	if saved.jobId == currentJobId then
+		serverState:clear()
+		return true
+	end
+
+	-- Игнорируем устаревшее сохранение (старше 5 минут), чтобы не телепортировать
+	-- аккаунты, которые просто подключаются со старым файлом.
+	local savedAt = tonumber(saved.savedAt) or 0
+	if tick() - savedAt > 300 then
 		serverState:clear()
 		return true
 	end
@@ -378,32 +389,66 @@ local function buildUI()
     end)
 end
 
+local function runCore()
+	if coreStarted then
+		return
+	end
+	coreStarted = true
+
+	if CONFIG.showUI then
+		buildUI()
+	else
+		startAgent()
+		popupCloser:start()
+		installAutoexec()
+	end
+
+	-- Фоновый поток для обработки флага остановки
+	task.spawn(function()
+		while not getgenv().StopSanDiegoAgent do
+			task.wait(1)
+		end
+		stopAgent()
+		print("[SanDiegoAgent] stopped")
+	end)
+end
+
 local UIPanel = {}
 
 function UIPanel.run()
-    getgenv().StopSanDiegoAgent = false
+	getgenv().StopSanDiegoAgent = false
 
-    if not ensureCorrectServer() then
-        print("[SanDiegoAgent][ServerGuard] waiting for teleport to previous server, agent not started")
-        return
-    end
+	if not ensureCorrectServer() then
+		print("[SanDiegoAgent][ServerGuard] waiting for teleport to previous server, agent not started")
 
-    if CONFIG.showUI then
-        buildUI()
-    else
-        startAgent()
-        popupCloser:start()
-        installAutoexec()
-    end
+		local TeleportService = game:GetService("TeleportService")
+		local conn
+		conn = TeleportService.TeleportInitFailed:Connect(function(player, result, msg)
+			if player == Players.LocalPlayer then
+				warn("[SanDiegoAgent][ServerGuard] teleport failed:", tostring(result), tostring(msg))
+				serverState:clear()
+				runCore()
+				if conn then
+					conn:Disconnect()
+				end
+			end
+		end)
 
-    -- Фоновый поток для обработки флага остановки
-    task.spawn(function()
-        while not getgenv().StopSanDiegoAgent do
-            task.wait(1)
-        end
-        stopAgent()
-        print("[SanDiegoAgent] stopped")
-    end)
+		task.delay(10, function()
+			if conn then
+				conn:Disconnect()
+			end
+			if not coreStarted then
+				warn("[SanDiegoAgent][ServerGuard] teleport timeout, starting agent on current server")
+				serverState:clear()
+				runCore()
+			end
+		end)
+
+		return
+	end
+
+	runCore()
 end
 
 return UIPanel
