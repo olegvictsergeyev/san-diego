@@ -433,26 +433,33 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera)
 	local start = tick()
 
 	local RunService = game:GetService("RunService")
-	local cameraConn
+	local cameraBind = "SanDiegoTurnCamera"
+
 	local function updateCamera()
 		if not (hrp and camera) then
 			return
 		end
 		local look = hrp.CFrame.LookVector
 		pcall(function()
+			camera.CameraType = Enum.CameraType.Scriptable
 			camera.CFrame = CFrame.new(hrp.Position - look * 10 + Vector3.new(0, 5, 0), hrp.Position + look * 10)
 		end)
 	end
 
 	if withCamera and camera then
 		pcall(function()
-			camera.CameraType = Enum.CameraType.Custom
+			RunService:UnbindFromRenderStep(cameraBind)
 		end)
-		cameraConn = RunService.RenderStepped:Connect(updateCamera)
+		RunService:BindToRenderStep(cameraBind, Enum.RenderPriority.Camera.Value + 1, updateCamera)
 	end
 
 	while math.abs(diff) > 0.001 do
 		if self:_isCancelled() then
+			if withCamera and camera then
+				pcall(function()
+					RunService:UnbindFromRenderStep(cameraBind)
+				end)
+			end
 			return { success = false, error = "cancelled" }
 		end
 
@@ -470,12 +477,12 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera)
 	hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, targetYaw, 0)
 
 	if withCamera and camera then
-		updateCamera()
-		if cameraConn then
-			cameraConn:Disconnect()
-		end
 		pcall(function()
-			camera.CameraType = Enum.CameraType.Follow
+			RunService:UnbindFromRenderStep(cameraBind)
+		end)
+		updateCamera()
+		pcall(function()
+			camera.CameraType = Enum.CameraType.Custom
 		end)
 	end
 
