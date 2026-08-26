@@ -469,8 +469,10 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera)
 
 	local RunService = game:GetService("RunService")
 	local cameraBind = "SanDiegoTurnCamera"
+	local releaseBind = "SanDiegoTurnCameraRelease"
+	local cameraPriority = (Enum.RenderPriority and Enum.RenderPriority.Camera.Value + 1) or 201
 
-	local function updateCamera()
+	local function alignCamera()
 		if not (hrp and camera) then
 			return
 		end
@@ -481,18 +483,55 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera)
 		end)
 	end
 
+	local function releaseCamera()
+		if not (withCamera and camera) then
+			return
+		end
+		pcall(function()
+			RunService:UnbindFromRenderStep(cameraBind)
+		end)
+		pcall(function()
+			RunService:UnbindFromRenderStep(releaseBind)
+		end)
+		pcall(function()
+			camera.CameraType = Enum.CameraType.Custom
+		end)
+		local releaseStart = tick()
+		RunService:BindToRenderStep(releaseBind, cameraPriority, function()
+			if not (hrp and camera) then
+				pcall(function()
+					RunService:UnbindFromRenderStep(releaseBind)
+				end)
+				return
+			end
+			local look = hrp.CFrame.LookVector
+			pcall(function()
+				camera.CFrame = CFrame.new(hrp.Position - look * 10 + Vector3.new(0, 5, 0), hrp.Position + look * 10)
+			end)
+			if tick() - releaseStart >= 0.5 then
+				pcall(function()
+					RunService:UnbindFromRenderStep(releaseBind)
+				end)
+			end
+		end)
+	end
+
 	if withCamera and camera then
 		pcall(function()
 			RunService:UnbindFromRenderStep(cameraBind)
 		end)
-		RunService:BindToRenderStep(cameraBind, Enum.RenderPriority.Camera.Value + 1, updateCamera)
+		pcall(function()
+			RunService:UnbindFromRenderStep(releaseBind)
+		end)
+		RunService:BindToRenderStep(cameraBind, cameraPriority, alignCamera)
 	end
 
 	while math.abs(diff) > 0.001 do
 		if self:_isCancelled() then
-			if withCamera and camera then
+			releaseCamera()
+			if humanoid and originalAutoRotate ~= nil then
 				pcall(function()
-					RunService:UnbindFromRenderStep(cameraBind)
+					humanoid.AutoRotate = originalAutoRotate
 				end)
 			end
 			return { success = false, error = "cancelled" }
@@ -512,10 +551,8 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera)
 	hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, targetYaw, 0)
 
 	if withCamera and camera then
-		pcall(function()
-			RunService:UnbindFromRenderStep(cameraBind)
-		end)
-		updateCamera()
+		alignCamera()
+		releaseCamera()
 	end
 
 	if humanoid and originalAutoRotate ~= nil then
