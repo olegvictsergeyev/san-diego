@@ -481,9 +481,6 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera)
 			RunService:UnbindFromRenderStep(cameraBind)
 		end)
 		updateCamera()
-		pcall(function()
-			camera.CameraType = Enum.CameraType.Custom
-		end)
 	end
 
 	if humanoid and originalAutoRotate ~= nil then
