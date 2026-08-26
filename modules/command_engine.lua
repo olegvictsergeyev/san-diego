@@ -432,13 +432,26 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera)
 	local duration = math.min(math.abs(diff) * (1 / math.rad(90)), 2)
 	local start = tick()
 
-	if withCamera and camera then
+	local RunService = game:GetService("RunService")
+	local cameraConn
+	local function updateCamera()
+		if not (hrp and camera) then
+			return
+		end
+		local look = hrp.CFrame.LookVector
 		pcall(function()
-			camera.CameraType = Enum.CameraType.Follow
+			camera.CFrame = CFrame.new(hrp.Position - look * 10 + Vector3.new(0, 5, 0), hrp.Position + look * 10)
 		end)
 	end
 
-	while true do
+	if withCamera and camera then
+		pcall(function()
+			camera.CameraType = Enum.CameraType.Custom
+		end)
+		cameraConn = RunService.RenderStepped:Connect(updateCamera)
+	end
+
+	while math.abs(diff) > 0.001 do
 		if self:_isCancelled() then
 			return { success = false, error = "cancelled" }
 		end
@@ -457,6 +470,10 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera)
 	hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, targetYaw, 0)
 
 	if withCamera and camera then
+		updateCamera()
+		if cameraConn then
+			cameraConn:Disconnect()
+		end
 		pcall(function()
 			camera.CameraType = Enum.CameraType.Follow
 		end)
