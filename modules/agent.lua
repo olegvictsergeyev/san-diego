@@ -254,7 +254,50 @@ function Agent:_statusLoop()
 	while self.running do
 		task.wait(self.config.statusInterval)
 		if self.running then
-			self:_sendStatus()
+			local ok, err = pcall(function()
+				self:_sendStatus()
+			end)
+			if not ok then
+				self:_log("ERROR", "status loop error:", tostring(err))
+			end
+		end
+	end
+end
+
+function Agent:_fetcherLoop()
+	while self.running do
+		local ok, command = pcall(function()
+			return self:_fetchNextCommand()
+		end)
+		if not ok then
+			self:_log("ERROR", "fetcher loop error:", tostring(command))
+			task.wait(1)
+		elseif command then
+			self:_log("INFO", "fetched command", command.id, command.name)
+			if command.name == "cancel" then
+				self:_handleCancel(command)
+			else
+				table.insert(self.commandQueue, command)
+			end
+		else
+			task.wait(1)
+		end
+	end
+end
+
+function Agent:_workerLoop()
+	while self.running do
+		if #self.commandQueue > 0 then
+			local command = table.remove(self.commandQueue, 1)
+			local ok, err = pcall(function()
+				self:_handleCommand(command)
+			end)
+			if not ok then
+				self:_log("ERROR", "worker loop error:", tostring(err))
+				self:_finishCommand(command.id, "error", { success = false, error = tostring(err) })
+			end
+		else
+			task.wait(0.1)
 		end
 	end
 end
