@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.7.2",
+    version = "0.7.3",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -117,10 +117,10 @@ local function ensureCorrectServer()
 		return true
 	end
 
-	-- Игнорируем устаревшее сохранение (старше 30 минут), чтобы не телепортировать
+	-- Игнорируем устаревшее сохранение (старше 3 минут), чтобы не телепортировать
 	-- аккаунты, которые просто подключаются со старым файлом.
 	local savedAt = tonumber(saved.savedAt) or 0
-	if tick() - savedAt > 1800 then
+	if tick() - savedAt > 180 then
 		serverState:clear()
 		return true
 	end
@@ -140,6 +140,7 @@ local function ensureCorrectServer()
 	if not ok then
 		warn("[SanDiegoAgent][ServerGuard] teleport failed: " .. tostring(err))
 		serverState:clear()
+		hideTeleportErrorPrompt()
 		return true
 	end
 
@@ -389,6 +390,27 @@ local function buildUI()
     end)
 end
 
+local function hideTeleportErrorPrompt()
+	local ok, coreGui = pcall(function()
+		return game:GetService("CoreGui")
+	end)
+	if not ok then
+		return
+	end
+	local promptGui = coreGui:FindFirstChild("RobloxPromptGui")
+	if not promptGui then
+		return
+	end
+	local overlay = promptGui:FindFirstChild("promptOverlay")
+	if not overlay then
+		return
+	end
+	local prompt = overlay:FindFirstChild("ErrorPrompt")
+	if prompt and typeof(prompt) == "Instance" then
+		prompt.Visible = false
+	end
+end
+
 local function runCore()
 	if coreStarted then
 		return
@@ -427,6 +449,7 @@ function UIPanel.run()
 			if player == Players.LocalPlayer then
 				warn("[SanDiegoAgent][ServerGuard] teleport failed:", tostring(result), tostring(msg))
 				serverState:clear()
+				hideTeleportErrorPrompt()
 				runCore()
 				if conn then
 					conn:Disconnect()
@@ -441,6 +464,7 @@ function UIPanel.run()
 			if not coreStarted then
 				warn("[SanDiegoAgent][ServerGuard] teleport timeout, starting agent on current server")
 				serverState:clear()
+				hideTeleportErrorPrompt()
 				runCore()
 			end
 		end)
