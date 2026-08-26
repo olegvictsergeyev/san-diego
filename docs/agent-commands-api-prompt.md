@@ -124,15 +124,9 @@ POST /commands/{id}/result
       "params": {}
     },
     {
-      "name": "turn_left",
+      "name": "turn",
       "params": {
-        "degrees": { "type": "number", "min": 1, "max": 360 }
-      }
-    },
-    {
-      "name": "turn_right",
-      "params": {
-        "degrees": { "type": "number", "min": 1, "max": 360 }
+        "degrees": { "type": "number", "min": -360, "max": 360 }
       }
     },
     {
