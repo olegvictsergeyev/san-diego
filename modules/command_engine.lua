@@ -154,14 +154,27 @@ function CommandEngine:getCommandsSpec()
 		},
 		{
 			name = "turn",
-			description = "Повернуть персонажа на N градусов",
+			description = "Повернуть персонажа на указанный абсолютный угол (0..360)",
 			params = {
 				degrees = {
 					type = "integer",
 					required = true,
-					min = -360,
+					min = 0,
 					max = 360,
-					description = "Положительное — по часовой, отрицательное — против часовой",
+					description = "Абсолютный угол в градусах",
+				},
+			},
+		},
+		{
+			name = "turn_with_camera",
+			description = "Повернуть персонажа и камеру на указанный абсолютный угол (0..360)",
+			params = {
+				degrees = {
+					type = "integer",
+					required = true,
+					min = 0,
+					max = 360,
+					description = "Абсолютный угол в градусах",
 				},
 			},
 		},
@@ -366,31 +379,111 @@ function CommandEngine:_validateTurn(payload)
 	if degrees % 1 ~= 0 then
 		return false, "param 'degrees' must be an integer"
 	end
-	if degrees < -360 or degrees > 360 then
-		return false, "param 'degrees' out of range [-360, 360]"
+	if degrees < 0 or degrees > 360 then
+		return false, "param 'degrees' out of range [0, 360]"
 	end
 	return true, degrees
 end
 
-function CommandEngine:_executeTurn(degrees)
+function CommandEngine:_normalizeAngle(angle)
+	while angle < 0 do
+		angle = angle + 2 * math.pi
+	end
+	while angle >= 2 * math.pi do
+		angle = angle - 2 * math.pi
+	end
+	return angle
+end
+
+function CommandEngine:_getYaw(cframe)
+	local _, yaw = cframe:ToEulerAnglesYXZ()
+	return self:_normalizeAngle(yaw)
+end
+
+function CommandEngine:_shortestAngleDiff(current, target)
+	local diff = target - current
+	return math.atan2(math.sin(diff), math.cos(diff))
+end
+
+function CommandEngine:_smoothTurn(targetDegrees, withCamera)
+	local ok, degrees = self:_validateTurn({ degrees = targetDegrees })
+	if not ok then
+		return { success = false, error = degrees }
+	end
+
 	local hrp = self:_getHrp()
 	if not hrp then
 		return { success = false, error = "HumanoidRootPart not found" }
 	end
 
-	if self:_isCancelled() then
-		return { success = false, error = "cancelled" }
+	local humanoid = self:_getHumanoid()
+	local camera = workspace.CurrentCamera
+	local originalAutoRotate = humanoid and humanoid.AutoRotate
+
+	if humanoid then
+		pcall(function()
+			humanoid.AutoRotate = false
+		end)
 	end
 
-	local angle = math.rad(-degrees)
-	hrp.CFrame = hrp.CFrame * CFrame.Angles(0, angle, 0)
+	local currentYaw = self:_getYaw(hrp.CFrame)
+	local targetYaw = math.rad(degrees)
+	local diff = self:_shortestAngleDiff(currentYaw, targetYaw)
+	local duration = math.min(math.abs(diff) * (1 / math.rad(90)), 2)
+	local start = tick()
 
-	local _, yaw, _ = hrp.CFrame:ToEulerAnglesYXZ()
+	if withCamera and camera then
+		pcall(function()
+			camera.CameraType = Enum.CameraType.Scriptable
+		end)
+	end
+
+	while true do
+		if self:_isCancelled() then
+			return { success = false, error = "cancelled" }
+		end
+
+		local t = math.min((tick() - start) / duration, 1)
+		local newYaw = currentYaw + diff * t
+		local cf = CFrame.new(hrp.Position) * CFrame.Angles(0, newYaw, 0)
+		hrp.CFrame = cf
+
+		if withCamera and camera then
+			local look = cf.LookVector
+			pcall(function()
+				camera.CFrame = CFrame.new(hrp.Position - look * 10 + Vector3.new(0, 5, 0), hrp.Position + look * 10)
+			end)
+		end
+
+		if t >= 1 then
+			break
+		end
+		task.wait(0.03)
+	end
+
+	hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, targetYaw, 0)
+
+	if withCamera and camera then
+		local look = hrp.CFrame.LookVector
+		pcall(function()
+			camera.CFrame = CFrame.new(hrp.Position - look * 10 + Vector3.new(0, 5, 0), hrp.Position + look * 10)
+			camera.CameraType = Enum.CameraType.Follow
+		end)
+	end
+
+	if humanoid and originalAutoRotate ~= nil then
+		pcall(function()
+			humanoid.AutoRotate = originalAutoRotate
+		end)
+	end
+
+	local _, finalYaw = hrp.CFrame:ToEulerAnglesYXZ()
 	return {
 		success = true,
 		data = {
 			degrees = degrees,
-			newYaw = math.round(math.deg(yaw) * 10) / 10,
+			withCamera = withCamera,
+			newYaw = math.round(math.deg(self:_normalizeAngle(finalYaw)) * 10) / 10,
 		},
 	}
 end
@@ -400,7 +493,15 @@ function CommandEngine:_turnCommand(payload)
 	if not ok then
 		return { success = false, error = degrees }
 	end
-	return self:_executeTurn(degrees)
+	return self:_smoothTurn(degrees, false)
+end
+
+function CommandEngine:_turnWithCameraCommand(payload)
+	local ok, degrees = self:_validateTurn(payload)
+	if not ok then
+		return { success = false, error = degrees }
+	end
+	return self:_smoothTurn(degrees, true)
 end
 
 function CommandEngine:_cancelCurrent()
@@ -438,6 +539,8 @@ function CommandEngine:execute(command)
 		result = self:_respawn()
 	elseif name == "turn" then
 		result = self:_turnCommand(payload)
+	elseif name == "turn_with_camera" then
+		result = self:_turnWithCameraCommand(payload)
 	elseif name == "join_private_server" then
 		result = self:_joinPrivateServer(payload)
 	elseif name == "cancel" then
