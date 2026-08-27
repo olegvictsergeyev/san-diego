@@ -483,10 +483,19 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera, turnSpeed)
 	local currentYaw = self:_getYaw(hrp.CFrame)
 	local targetYaw = math.rad(degrees)
 	local diff = self:_shortestAngleDiff(currentYaw, targetYaw)
+
+	-- Начальный угол камеры может отличаться от угла персонажа.
+	-- Поворачиваем камеру плавно от её текущего положения к целевому.
+	local startCameraYaw = (camera and self:_getYaw(camera.CFrame)) or currentYaw
+	local cameraDiff = self:_shortestAngleDiff(startCameraYaw, targetYaw)
+
+	-- Длительность считаем по большему из двух углов (персонаж или камера),
+	-- чтобы камера тоже поворачивалась плавно, даже если персонаж уже на месте.
+	local maxDiff = math.max(math.abs(diff), math.abs(cameraDiff))
 	-- База: 1 секунда на 90 градусов при speed 10. Меньший speed = дольше.
-	local baseDuration = math.abs(diff) * (1 / math.rad(90))
+	local baseDuration = maxDiff * (1 / math.rad(90))
 	local duration = baseDuration * (10 / turnSpeed)
-	duration = math.clamp(duration, 0.1, 5)
+	duration = math.clamp(duration, 0.5, 5)
 	local start = tick()
 
 	local RunService = game:GetService("RunService")
@@ -498,14 +507,43 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera, turnSpeed)
 	-- чтобы Roblox-камера успела "подхватить" новое направление.
 	local releaseDuration = math.clamp(duration * 0.5, 0.5, 2.0)
 
+	local function cameraCFrameFromYaw(yaw)
+		local fakeCf = CFrame.new(hrp.Position) * CFrame.Angles(0, yaw, 0)
+		local look = fakeCf.LookVector
+		return CFrame.new(hrp.Position - look * 10 + Vector3.new(0, 5, 0), hrp.Position + look * 10)
+	end
+
 	local function alignCamera()
 		if not (hrp and camera) then
 			return
 		end
-		local look = hrp.CFrame.LookVector
+		local t = math.min((tick() - start) / duration, 1)
+		-- ease-out: быстрее в начале, мягче к концу
+		local easedT = math.sin(t * math.pi / 2)
+		local yaw = startCameraYaw + cameraDiff * easedT
 		pcall(function()
 			camera.CameraType = Enum.CameraType.Scriptable
-			camera.CFrame = CFrame.new(hrp.Position - look * 10 + Vector3.new(0, 5, 0), hrp.Position + look * 10)
+			camera.CFrame = cameraCFrameFromYaw(yaw)
+		end)
+	end
+
+	local function syncCameraController(targetYawValue)
+		local player = Players.LocalPlayer
+		if not player then
+			return
+		end
+		pcall(function()
+			local playerModule = require(player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule"))
+			local cameraController = playerModule:GetCameras()
+			local active = cameraController and cameraController.activeCameraController
+			if active and typeof(active) == "table" then
+				active.azimuth = targetYawValue
+				-- Синхронизируем наклон по текущему CFrame камеры.
+				local look = camera and camera.CFrame.LookVector
+				if look then
+					active.elevation = math.asin(math.clamp(look.Y, -1, 1))
+				end
+			end
 		end)
 	end
 
@@ -519,6 +557,8 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera, turnSpeed)
 		pcall(function()
 			RunService:UnbindFromRenderStep(releaseBind)
 		end)
+		-- Пытаемся прописать новый угол в CameraModule, чтобы Custom не сбросил его.
+		syncCameraController(targetYaw)
 		pcall(function()
 			camera.CameraType = Enum.CameraType.Custom
 		end)
@@ -530,9 +570,8 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera, turnSpeed)
 				end)
 				return
 			end
-			local look = hrp.CFrame.LookVector
 			pcall(function()
-				camera.CFrame = CFrame.new(hrp.Position - look * 10 + Vector3.new(0, 5, 0), hrp.Position + look * 10)
+				camera.CFrame = cameraCFrameFromYaw(targetYaw)
 			end)
 			if tick() - releaseStart >= releaseDuration then
 				pcall(function()
@@ -564,7 +603,8 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera, turnSpeed)
 		end
 
 		local t = math.min((tick() - start) / duration, 1)
-		local newYaw = currentYaw + diff * t
+		local easedT = math.sin(t * math.pi / 2)
+		local newYaw = currentYaw + diff * easedT
 		local cf = CFrame.new(hrp.Position) * CFrame.Angles(0, newYaw, 0)
 		hrp.CFrame = cf
 
