@@ -179,6 +179,8 @@ end
 
 function Agent:_handleCommand(command)
 	self.currentCommand = command
+	local startedAt = os.time()
+	self.state:setCommandState("in_progress", command.name, startedAt)
 	self:_updateCommandStatus(command.id, "in_progress")
 
 	local ok, result = pcall(function()
@@ -204,8 +206,13 @@ function Agent:_handleCommand(command)
 		self.lastCommandMessage = result.error
 		self.lastCommandResult = result
 		self:_sendCommandResult(command.id, result, "cancelled")
+		self.state:setCommandState("idle", nil, nil)
+	elseif status == "error" then
+		self:_finishCommand(command.id, status, result)
+		self.state:setCommandState("error", command.name, startedAt)
 	else
 		self:_finishCommand(command.id, status, result)
+		self.state:setCommandState("idle", nil, nil)
 	end
 
 	self.currentCommand = nil

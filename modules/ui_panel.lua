@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.9.0",
+    version = "1.0.0",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",

@@ -36,11 +36,16 @@ san-diego/
      "game_slug": "san-diego",
      "server_id": "...",
      "place_id": "...",
-     "status": "online",
-     "balance": 1250,
+     "status": "idle",
+     "version": "1.0.0",
      "custom_data": {
-       "location": "123.5, 10.0, -45.2",
-       "team": "Civilian"
+       "position_x": 123.5,
+       "position_y": 10.0,
+       "position_z": -45.2,
+       "team": "Civilian",
+       "balance": 1250,
+       "current_command": "move_x",
+       "command_started_at": "2026-08-27T15:30:00+03:00"
      }
    }
    ```

@@ -6,7 +6,15 @@
 
 ## Статус аккаунта
 
-Агент отправляет `POST /game/update` каждые 5–10 секунд:
+Агент отправляет `POST /game/update` каждые 5–10 секунд.
+
+Статусы аккаунта:
+- `idle` — в игре, нет активной команды.
+- `in_progress` — выполняет команду.
+- `error` — произошла ошибка при выполнении команды.
+- `offline` — аккаунт не в игре.
+
+При статусах `in_progress` и `error` в `custom_data` передаются поля `current_command` и `command_started_at` (время по +03:00).
 
 ```json
 {
@@ -14,11 +22,16 @@
   "game_slug": "san-diego",
   "server_id": "abc-123-uuid",
   "place_id": "123456789",
-  "status": "online",
-  "balance": 1250.50,
+  "status": "idle",
+  "version": "1.0.0",
   "custom_data": {
-    "location": "123.5, 10.0, -45.2",
-    "team": "Civilian"
+    "position_x": 123.5,
+    "position_y": 10.0,
+    "position_z": -45.2,
+    "team": "Civilian",
+    "balance": 1250.50,
+    "current_command": "move_x",
+    "command_started_at": "2026-08-27T15:30:00+03:00"
   }
 }
 ```

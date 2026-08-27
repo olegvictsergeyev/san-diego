@@ -16,9 +16,17 @@ Roblox-агент для игры **San Diego** отправляет стату�
   "nickname": "PlayerOne",
   "place_id": "136020512003847",
   "server_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "status": "online",
-  "balance": 1250,
-  "version": "0.1.0"
+  "status": "idle",
+  "version": "1.0.0",
+  "custom_data": {
+    "position_x": 123.5,
+    "position_y": 10.0,
+    "position_z": -45.2,
+    "team": "Civilian",
+    "balance": 1250,
+    "current_command": "move_x",
+    "command_started_at": "2026-08-27T15:30:00+03:00"
+  }
 }
 ```
 
@@ -33,8 +41,11 @@ Roblox-агент для игры **San Diego** отправляет стату�
 - `custom_data` — опционально, tracked-поля (например, `location`, `team`).
 
 Tracked-поля для `san-diego`:
-- `location` (`string`) — координаты.
+- `position_x`, `position_y`, `position_z` (`number`) — координаты персонажа.
 - `team` (`string`) — команда/роль.
+- `balance` (`number`) — баланс игрока.
+- `current_command` (`string`) — имя выполняемой команды (если статус `in_progress` или `error`).
+- `command_started_at` (`string`) — время взятия команды в работу в формате ISO 8601 с часовым поясом +03:00.
 
 ## Модель команды
 

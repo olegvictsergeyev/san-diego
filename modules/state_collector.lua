@@ -198,13 +198,28 @@ function StateCollector:setStatusOverride(value)
 	self._statusOverride = value
 end
 
+function StateCollector:setCommandState(status, commandName, startedAt)
+	self._commandStatus = status
+	self._commandName = commandName
+	self._commandStartedAt = startedAt
+end
+
+function StateCollector:_formatMskTime(timestamp)
+	if not timestamp then return nil end
+	local t = os.date("!*t", timestamp + 3 * 3600)
+	return string.format("%04d-%02d-%02dT%02d:%02d:%02d+03:00", t.year, t.month, t.day, t.hour, t.min, t.sec)
+end
+
 function StateCollector:getStatus()
 	if self._statusOverride then
 		return self._statusOverride
 	end
+	if self._commandStatus then
+		return self._commandStatus
+	end
 	local player = self:_getLocalPlayer()
 	if not player then return "offline" end
-	return "online"
+	return "idle"
 end
 
 function StateCollector:getNickname()
@@ -222,11 +237,24 @@ function StateCollector:getPlaceId()
 end
 
 function StateCollector:getAll(custom)
+	local hrp = self:_getHumanoidRootPart()
+	local pos = hrp and hrp:IsA("BasePart") and hrp.Position or nil
+
 	local customData = {
-		location = self:getLocation(),
+		position_x = pos and math.round(pos.X * 10) / 10 or 0,
+		position_y = pos and math.round(pos.Y * 10) / 10 or 0,
+		position_z = pos and math.round(pos.Z * 10) / 10 or 0,
 		team = self:getTeam(),
-		balance_path = self:getBalancePath(),
+		balance = self:getBalance(),
 	}
+
+	if self._commandName then
+		customData.current_command = self._commandName
+	end
+	if self._commandStartedAt then
+		customData.command_started_at = self:_formatMskTime(self._commandStartedAt)
+	end
+
 	if typeof(custom) == "table" then
 		for k, v in pairs(custom) do
 			customData[k] = v
@@ -236,7 +264,6 @@ function StateCollector:getAll(custom)
 	return {
 		nickname = self:getNickname(),
 		status = self:getStatus(),
-		balance = self:getBalance(),
 		version = self.version,
 		server_id = self:getServerId(),
 		place_id = self:getPlaceId(),
