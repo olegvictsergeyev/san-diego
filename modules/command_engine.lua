@@ -533,7 +533,11 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera, turnSpeed)
 			return
 		end
 		pcall(function()
-			local playerModule = require(player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule"))
+			local playerScripts = player:WaitForChild("PlayerScripts", 2)
+			if not playerScripts then return end
+			local cameraModule = playerScripts:WaitForChild("CameraModule", 2)
+			if not cameraModule then return end
+			local playerModule = require(cameraModule)
 			local cameraController = playerModule:GetCameras()
 			local active = cameraController and cameraController.activeCameraController
 			if active and typeof(active) == "table" then
@@ -617,6 +621,11 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera, turnSpeed)
 	hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, targetYaw, 0)
 
 	if withCamera and camera then
+		-- Даём камере довернуться, даже если персонаж уже на целевом угле.
+		local remaining = duration - (tick() - start)
+		if remaining > 0 then
+			task.wait(remaining)
+		end
 		alignCamera()
 		releaseCamera()
 	end
