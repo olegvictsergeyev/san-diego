@@ -22,10 +22,35 @@ function ServerState:save(placeId, jobId)
 	if not jobId then
 		return false
 	end
+	local saved = self:load() or {}
 	local ok, json = pcall(function()
 		return HttpService:JSONEncode({
 			placeId = tostring(placeId or game.PlaceId),
 			jobId = tostring(jobId),
+			code = saved.code or nil,
+			savedAt = tick(),
+		})
+	end)
+	if not ok then
+		return false
+	end
+	self:_ensureFolder()
+	if self.compat and self.compat.writeFile then
+		return self.compat.writeFile(self.file, json)
+	end
+	return false
+end
+
+function ServerState:savePrivateCode(code)
+	if typeof(code) ~= "string" or code:gsub("%s+", "") == "" then
+		return false
+	end
+	local saved = self:load() or {}
+	local ok, json = pcall(function()
+		return HttpService:JSONEncode({
+			placeId = saved.placeId or tostring(game.PlaceId),
+			jobId = saved.jobId or nil,
+			code = code,
 			savedAt = tick(),
 		})
 	end)

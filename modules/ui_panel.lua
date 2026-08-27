@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "1.0.3",
+    version = "1.1.0",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -101,12 +101,19 @@ local CommandEngine = loadModule("command_engine")
 local Agent = loadModule("agent")
 local Afk = loadModule("afk")
 
+local serverState = ServerState.new(Compat, Players.LocalPlayer and Players.LocalPlayer.Name)
+
+local privateServer = PrivateServer.new({
+    loaderUrl = CONFIG.agentLoaderUrl,
+    compat = Compat,
+    serverState = serverState,
+})
+
 local currentAgent = nil
 local currentMainGui = nil
 local autoexec = Autoexec.new()
 local stateReader = StateCollector.new(CONFIG.balancePath, CONFIG.version)
 local popupCloser = PopupCloser.new(Compat)
-local serverState = ServerState.new(Compat, Players.LocalPlayer and Players.LocalPlayer.Name)
 
 local coreStarted = false
 local runCore
@@ -118,24 +125,44 @@ local function ensureCorrectServer()
 	end
 
 	local currentJobId = tostring(game.JobId)
-	if saved.jobId == currentJobId then
+
+	-- Уже на нужном сервере — сбрасываем сохранение.
+	if saved.jobId and saved.jobId == currentJobId then
 		serverState:clear()
 		return true
 	end
 
-	-- Игнорируем устаревшее сохранение (старше 3 минут), чтобы не телепортировать
-	-- аккаунты, которые просто подключаются со старым файлом.
+	-- Игнорируем устаревшее сохранение (старше 3 минут).
 	local savedAt = tonumber(saved.savedAt) or 0
 	if tick() - savedAt > 180 then
 		serverState:clear()
 		return true
 	end
 
+	-- Только что зашли по коду — сохраняем текущий JobId.
+	if saved.code and not saved.jobId then
+		serverState:save(game.PlaceId, currentJobId)
+		return true
+	end
+
+	-- Переподключаемся по коду, если он есть.
+	if saved.code then
+		warn("[SanDiegoAgent][ServerGuard] current server does not match saved " .. currentJobId .. ", reconnecting by private server code")
+		local ok, err = pcall(function()
+			privateServer:reconnectByCode(saved.code)
+		end)
+		if ok then
+			return false
+		end
+		warn("[SanDiegoAgent][ServerGuard] reconnect by code failed: " .. tostring(err))
+	end
+
+	-- Fallback: телепорт по placeId/jobId.
 	local placeId = tonumber(saved.placeId) or game.PlaceId
 	local jobId = tostring(saved.jobId)
 	warn("[SanDiegoAgent][ServerGuard] current server does not match saved " .. currentJobId .. ", teleporting to " .. jobId)
 
-	local loaderCode = 'getgenv().SanDiegoAgentBaseUrl = "' .. (getgenv().SanDiegoAgentBaseUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main") .. '"\nloadstring(game:HttpGet("' .. CONFIG.agentLoaderUrl .. '?nocache=" .. tostring(tick())))()'
+	local loaderCode = 'getgenv().SanDiegoAgentBaseUrl = "' .. (getgenv().SanDiegoAgentBaseUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main") .. '"\ngetgenv().SanDiegoAgentRunning = true\nloadstring(game:HttpGet("' .. CONFIG.agentLoaderUrl .. '?nocache=" .. tostring(tick())))()'
 	Compat.queueOnTeleport(loaderCode)
 
 	local TeleportService = game:GetService("TeleportService")
@@ -156,11 +183,6 @@ end
 local function makeAgent()
     local http = HttpClient.new(CONFIG.baseUrl)
     local state = StateCollector.new(CONFIG.balancePath, CONFIG.version)
-    local privateServer = PrivateServer.new({
-        loaderUrl = CONFIG.agentLoaderUrl,
-        compat = Compat,
-        serverState = serverState,
-    })
     local afk = Afk.new(CONFIG)
     local engine = CommandEngine.new(privateServer, afk)
     return Agent.new(CONFIG, http, state, engine, afk)

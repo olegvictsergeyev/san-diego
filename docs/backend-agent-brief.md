@@ -37,10 +37,15 @@
 ```
 
 Tracked-поля для игры `san-diego`:
-- `location` (string)
+- `position_x`, `position_y`, `position_z` (number)
 - `team` (string)
+- `balance` (number)
+- `current_command` (string)
+- `command_started_at` (string)
 
-## Endpoint'ы команд
+## Переподключение после дисконнекта
+
+При дисконнекте (ошибки 277/278) агент сохраняет последний известный сервер. Если перед этим была выполнена команда `join_private_server` с кодом, при переподключении агент сначала пытается зайти по этому же коду. Если кода нет или reconnect по коду не удался — fallback на телепорт по `place_id`/`server_id`.
 
 ### `GET /commands/next`
 
