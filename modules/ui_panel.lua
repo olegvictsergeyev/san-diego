@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "1.5.0",
+    version = "1.5.1",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -66,7 +66,7 @@ local CONFIG = {
 
     -- AFK-режим: периодическое незаметное действие, чтобы не выкидывало из игры
     afkEnabled = true,
-    afkInterval = 600,
+    afkInterval = 300,
 }
 
 local function loadModule(name)

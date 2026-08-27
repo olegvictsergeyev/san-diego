@@ -92,9 +92,15 @@ function Afk:_shortestAngleDiff(current, target)
 	return math.atan2(math.sin(diff), math.cos(diff))
 end
 
--- Незаметное действие: прыжок. Большинство игр считают это активностью,
--- а персонаж в простое почти не смещается.
-function Afk:_doJump()
+-- Имитация активности: клик через VirtualUser + прыжок.
+-- Этот подход совместим с защитой от AFK в San Diego.
+function Afk:_simulateActivity()
+	local VirtualUser = game:GetService("VirtualUser")
+	pcall(function()
+		VirtualUser:CaptureController()
+		VirtualUser:ClickButton1(Vector2.new(0, 0))
+	end)
+
 	local humanoid = self:_getHumanoid()
 	if not humanoid then return end
 	if humanoid.Health <= 0 then return end
@@ -112,7 +118,7 @@ function Afk:_performAction()
 	if not self.enabled then return end
 	if self:isBusy() then return end
 	local ok, err = pcall(function()
-		self:_doJump()
+		self:_simulateActivity()
 	end)
 	if not ok then
 		warn("[SanDiegoAgent][AFK] action failed:", tostring(err))
