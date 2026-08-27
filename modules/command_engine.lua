@@ -210,6 +210,26 @@ function CommandEngine:getCommandsSpec()
 			params = {},
 		},
 		{
+			name = "hold_key",
+			description = "Нажать и удерживать клавишу на указанное время",
+			params = {
+				key = {
+					type = "string",
+					required = true,
+					min = 1,
+					max = 32,
+					description = "Имя клавиши, например 'E', 'Space', 'LeftShift'",
+				},
+				duration = {
+					type = "integer",
+					required = true,
+					min = 0,
+					max = 60000,
+					description = "Время удержания клавиши в миллисекундах (0 — просто нажать и сразу отпустить)",
+				},
+			},
+		},
+		{
 			name = "cancel",
 			description = "Отменить текущую команду",
 			params = {},
@@ -602,6 +622,48 @@ function CommandEngine:_jumpCommand()
 	return { success = true, data = { jumped = true } }
 end
 
+function CommandEngine:_holdKeyCommand(payload)
+	local key = payload and payload.key
+	if typeof(key) ~= "string" or #key == 0 or #key > 32 then
+		return { success = false, error = "param 'key' must be a non-empty string" }
+	end
+
+	key = key:upper()
+	local keyCode = Enum.KeyCode[key]
+	if not keyCode then
+		return { success = false, error = "unknown key: " .. tostring(key) }
+	end
+
+	local duration = payload and payload.duration
+	if typeof(duration) ~= "number" or duration % 1 ~= 0 then
+		return { success = false, error = "param 'duration' must be an integer (ms)" }
+	end
+	if duration < 0 or duration > 60000 then
+		return { success = false, error = "param 'duration' out of range [0, 60000]" }
+	end
+
+	local VirtualInputManager = game:GetService("VirtualInputManager")
+	local ok, err = pcall(function()
+		VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+		if duration > 0 then
+			task.wait(duration / 1000)
+			VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+		else
+			task.wait()
+			VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+		end
+	end)
+	if not ok then
+		return { success = false, error = "VirtualInputManager failed: " .. tostring(err) }
+	end
+
+	if self:_isCancelled() then
+		return { success = false, error = "cancelled" }
+	end
+
+	return { success = true, data = { key = key, durationMs = duration } }
+end
+
 function CommandEngine:_validateTurn(payload)
 	local degrees = payload and payload.degrees
 	if typeof(degrees) ~= "number" then
@@ -919,6 +981,8 @@ function CommandEngine:execute(command)
 		result = self:_respawn()
 	elseif name == "jump" then
 		result = self:_jumpCommand()
+	elseif name == "hold_key" then
+		result = self:_holdKeyCommand(payload)
 	elseif name == "turn" then
 		result = self:_turnCommand(payload)
 	elseif name == "turn_with_camera" then

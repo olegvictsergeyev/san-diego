@@ -153,6 +153,13 @@ POST /commands/{id}/status
       "params": {}
     },
     {
+      "name": "hold_key",
+      "params": {
+        "key": { "type": "string", "min": 1, "max": 32 },
+        "duration": { "type": "number", "min": 0, "max": 60000 }
+      }
+    },
+    {
       "name": "turn",
       "params": {
         "degrees": { "type": "number", "min": 0, "max": 360 },
