@@ -92,30 +92,24 @@ function Afk:_shortestAngleDiff(current, target)
 	return math.atan2(math.sin(diff), math.cos(diff))
 end
 
--- Незаметное действие: поворот персонажа на небольшой угол и обратно.
-function Afk:_doTinyWiggle()
-	local hrp = self:_getHrp()
+-- Незаметное действие: прыжок. Большинство игр считают это активностью,
+-- а персонаж в простое почти не смещается.
+function Afk:_doJump()
 	local humanoid = self:_getHumanoid()
-	if not hrp or not humanoid then return end
+	if not humanoid then return end
 	if humanoid.Health <= 0 then return end
 	if humanoid:GetState() == Enum.HumanoidStateType.Dead then return end
 
-	local currentYaw = self:_getYaw(hrp.CFrame)
-	local wiggle = math.rad(2)
-	local direction = math.random() > 0.5 and 1 or -1
-	local tempYaw = self:_normalizeAngle(currentYaw + wiggle * direction)
-	local diff = self:_shortestAngleDiff(currentYaw, tempYaw)
-
-	hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, currentYaw + diff, 0)
-	task.wait(0.08)
-	hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, currentYaw, 0)
+	pcall(function()
+		humanoid.Jump = true
+	end)
 end
 
 function Afk:_performAction()
 	if not self.enabled then return end
 	if self:isBusy() then return end
 	local ok, err = pcall(function()
-		self:_doTinyWiggle()
+		self:_doJump()
 	end)
 	if not ok then
 		warn("[SanDiegoAgent][AFK] action failed:", tostring(err))
