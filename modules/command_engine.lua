@@ -184,6 +184,13 @@ function CommandEngine:getCommandsSpec()
 					max = 360,
 					description = "Абсолютный угол в градусах",
 				},
+				speed = {
+					type = "integer",
+					required = false,
+					min = 1,
+					max = 10,
+					description = "Скорость поворота: 10 — быстро (по умолчанию), 1 — медленно",
+				},
 			},
 		},
 		{
@@ -196,6 +203,13 @@ function CommandEngine:getCommandsSpec()
 					min = 0,
 					max = 360,
 					description = "Абсолютный угол в градусах",
+				},
+				speed = {
+					type = "integer",
+					required = false,
+					min = 1,
+					max = 10,
+					description = "Скорость поворота: 10 — быстро (по умолчанию), 1 — медленно",
 				},
 			},
 		},
@@ -440,10 +454,15 @@ function CommandEngine:_shortestAngleDiff(current, target)
 	return math.atan2(math.sin(diff), math.cos(diff))
 end
 
-function CommandEngine:_smoothTurn(targetDegrees, withCamera)
+function CommandEngine:_smoothTurn(targetDegrees, withCamera, turnSpeed)
 	local ok, degrees = self:_validateTurn({ degrees = targetDegrees })
 	if not ok then
 		return { success = false, error = degrees }
+	end
+
+	turnSpeed = tonumber(turnSpeed) or 10
+	if type(turnSpeed) ~= "number" or turnSpeed % 1 ~= 0 or turnSpeed < 1 or turnSpeed > 10 then
+		return { success = false, error = "param 'speed' must be an integer in [1, 10]" }
 	end
 
 	local hrp = self:_getHrp()
@@ -464,13 +483,20 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera)
 	local currentYaw = self:_getYaw(hrp.CFrame)
 	local targetYaw = math.rad(degrees)
 	local diff = self:_shortestAngleDiff(currentYaw, targetYaw)
-	local duration = math.min(math.abs(diff) * (1 / math.rad(90)), 2)
+	-- База: 1 секунда на 90 градусов при speed 10. Меньший speed = дольше.
+	local baseDuration = math.abs(diff) * (1 / math.rad(90))
+	local duration = baseDuration * (10 / turnSpeed)
+	duration = math.clamp(duration, 0.1, 5)
 	local start = tick()
 
 	local RunService = game:GetService("RunService")
 	local cameraBind = "SanDiegoTurnCamera"
 	local releaseBind = "SanDiegoTurnCameraRelease"
 	local cameraPriority = (Enum.RenderPriority and Enum.RenderPriority.Camera.Value + 1) or 201
+
+	-- Чем медленнее поворот, тем дольше держим камеру после него,
+	-- чтобы Roblox-камера успела "подхватить" новое направление.
+	local releaseDuration = math.clamp(duration * 0.5, 0.5, 2.0)
 
 	local function alignCamera()
 		if not (hrp and camera) then
@@ -508,7 +534,7 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera)
 			pcall(function()
 				camera.CFrame = CFrame.new(hrp.Position - look * 10 + Vector3.new(0, 5, 0), hrp.Position + look * 10)
 			end)
-			if tick() - releaseStart >= 0.5 then
+			if tick() - releaseStart >= releaseDuration then
 				pcall(function()
 					RunService:UnbindFromRenderStep(releaseBind)
 				end)
@@ -577,7 +603,8 @@ function CommandEngine:_turnCommand(payload)
 	if not ok then
 		return { success = false, error = degrees }
 	end
-	return self:_smoothTurn(degrees, false)
+	local speed = payload and payload.speed
+	return self:_smoothTurn(degrees, false, speed)
 end
 
 function CommandEngine:_turnWithCameraCommand(payload)
@@ -585,7 +612,8 @@ function CommandEngine:_turnWithCameraCommand(payload)
 	if not ok then
 		return { success = false, error = degrees }
 	end
-	return self:_smoothTurn(degrees, true)
+	local speed = payload and payload.speed
+	return self:_smoothTurn(degrees, true, speed)
 end
 
 function CommandEngine:_cancelCurrent()

@@ -127,13 +127,15 @@ POST /commands/{id}/result
     {
       "name": "turn",
       "params": {
-        "degrees": { "type": "number", "min": 0, "max": 360 }
+        "degrees": { "type": "number", "min": 0, "max": 360 },
+        "speed": { "type": "number", "min": 1, "max": 10 }
       }
     },
     {
       "name": "turn_with_camera",
       "params": {
-        "degrees": { "type": "number", "min": 0, "max": 360 }
+        "degrees": { "type": "number", "min": 0, "max": 360 },
+        "speed": { "type": "number", "min": 1, "max": 10 }
       }
     },
     {
