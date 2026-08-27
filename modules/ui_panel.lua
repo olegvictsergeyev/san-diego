@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "0.8.2",
+    version = "0.9.0",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -48,6 +48,7 @@ local CONFIG = {
             ui_toggle = base .. "/modules/ui_toggle.lua",
             autoexec = base .. "/modules/autoexec.lua",
             server_state = base .. "/modules/server_state.lua",
+            afk = base .. "/modules/afk.lua",
         }
     end)(),
 
@@ -62,6 +63,10 @@ local CONFIG = {
 
     -- true — автоматически нажимать Reconnect при ошибке 277
     autoReconnectOnDisconnect = true,
+
+    -- AFK-режим: периодическое незаметное действие, чтобы не выкидывало из игры
+    afkEnabled = true,
+    afkInterval = 600,
 }
 
 local function loadModule(name)
@@ -94,6 +99,7 @@ local Autoexec = loadModule("autoexec")
 local ServerState = loadModule("server_state")
 local CommandEngine = loadModule("command_engine")
 local Agent = loadModule("agent")
+local Afk = loadModule("afk")
 
 local currentAgent = nil
 local currentMainGui = nil
@@ -155,8 +161,9 @@ local function makeAgent()
         compat = Compat,
         serverState = serverState,
     })
-    local engine = CommandEngine.new(privateServer)
-    return Agent.new(CONFIG, http, state, engine)
+    local afk = Afk.new(CONFIG)
+    local engine = CommandEngine.new(privateServer, afk)
+    return Agent.new(CONFIG, http, state, engine, afk)
 end
 
 local function startWatcher()

@@ -3,10 +3,11 @@ local Players = game:GetService("Players")
 local CommandEngine = {}
 CommandEngine.__index = CommandEngine
 
-function CommandEngine.new(privateServer)
+function CommandEngine.new(privateServer, afk)
 	local self = setmetatable({}, CommandEngine)
 	self.cancelled = false
 	self.currentCommandId = nil
+	self.afk = afk
 	if privateServer then
 		self.privateServer = privateServer
 	else
@@ -18,6 +19,14 @@ function CommandEngine.new(privateServer)
 		end
 	end
 	return self
+end
+
+function CommandEngine:setAfk(afk)
+	self.afk = afk
+end
+
+function CommandEngine:isBusy()
+	return self.currentCommandId ~= nil
 end
 
 function CommandEngine:_getPlayer()
@@ -172,6 +181,26 @@ function CommandEngine:getCommandsSpec()
 			name = "cancel",
 			description = "Отменить текущую команду",
 			params = {},
+		},
+		{
+			name = "afk",
+			description = "Управление AFK-режимом: включить/выключить или задать интервал",
+			params = {
+				enabled = {
+					type = "string",
+					required = false,
+					min = 2,
+					max = 5,
+					description = "Включить/выключить AFK: 'on' или 'off'",
+				},
+				interval = {
+					type = "integer",
+					required = false,
+					min = 60,
+					max = 3600,
+					description = "Интервал незаметного действия в секундах (по умолчанию 600)",
+				},
+			},
 		},
 		{
 			name = "turn",
@@ -670,6 +699,41 @@ function CommandEngine:_cancelCurrent()
 	return { success = true, data = { cancelledCommandId = self.currentCommandId } }
 end
 
+function CommandEngine:_afkCommand(payload)
+	if not self.afk then
+		return { success = false, error = "AFK module not available" }
+	end
+
+	local enabled = payload and payload.enabled
+	if enabled ~= nil then
+		enabled = tostring(enabled):lower()
+		if enabled == "on" or enabled == "true" or enabled == "1" or enabled == "yes" then
+			self.afk:setEnabled(true)
+		elseif enabled == "off" or enabled == "false" or enabled == "0" or enabled == "no" then
+			self.afk:setEnabled(false)
+		else
+			return { success = false, error = "enabled must be 'on' or 'off'" }
+		end
+	end
+
+	local interval = payload and payload.interval
+	if interval ~= nil then
+		interval = tonumber(interval)
+		if type(interval) ~= "number" or interval % 1 ~= 0 or interval < 60 or interval > 3600 then
+			return { success = false, error = "interval must be integer in [60, 3600]" }
+		end
+		self.afk:setInterval(interval)
+	end
+
+	return {
+		success = true,
+		data = {
+			enabled = self.afk.enabled,
+			interval = self.afk.interval,
+		},
+	}
+end
+
 function CommandEngine:_joinPrivateServer(payload)
 	local code = payload and payload.code
 	if typeof(code) ~= "string" or code:gsub("%s+", "") == "" then
@@ -706,6 +770,8 @@ function CommandEngine:execute(command)
 		result = self:_joinPrivateServer(payload)
 	elseif name == "cancel" then
 		result = self:_cancelCurrent()
+	elseif name == "afk" then
+		result = self:_afkCommand(payload)
 	else
 		result = { success = false, error = "unknown command: " .. tostring(name) }
 	end

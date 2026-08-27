@@ -143,6 +143,13 @@ POST /commands/{id}/result
       "params": {
         "code": { "type": "string", "min": 1, "max": 64 }
       }
+    },
+    {
+      "name": "afk",
+      "params": {
+        "enabled": { "type": "string", "min": 2, "max": 5 },
+        "interval": { "type": "number", "min": 60, "max": 3600 }
+      }
     }
   ]
 }

@@ -3,7 +3,7 @@ local HttpService = game:GetService("HttpService")
 local Agent = {}
 Agent.__index = Agent
 
-function Agent.new(config, httpClient, stateCollector, commandEngine)
+function Agent.new(config, httpClient, stateCollector, commandEngine, afk)
 	local self = setmetatable({}, Agent)
 
 	self.config = {
@@ -17,6 +17,7 @@ function Agent.new(config, httpClient, stateCollector, commandEngine)
 	self.http = httpClient
 	self.state = stateCollector
 	self.engine = commandEngine
+	self.afk = afk
 
 	self.running = false
 	self.lastCommandId = nil
@@ -325,11 +326,23 @@ function Agent:start()
 	task.spawn(function()
 		self:_workerLoop()
 	end)
+
+	if self.afk then
+		local afk = self.afk
+		-- Связываем проверку занятости: AFK не мешает выполнению команд.
+		afk:setBusyCheck(function()
+			return self.currentCommand ~= nil
+		end)
+		afk:start()
+	end
 end
 
 function Agent:stop()
 	self.running = false
 	self.engine:requestCancel()
+	if self.afk then
+		self.afk:stop()
+	end
 	self:_log("INFO", "agent stopped")
 end
 
