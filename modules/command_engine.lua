@@ -160,6 +160,33 @@ function CommandEngine:getCommandsSpec()
 			},
 		},
 		{
+			name = "move_to",
+			description = "Переместить персонажа к целевым координатам X и Z",
+			params = {
+				x = {
+					type = "integer",
+					required = true,
+					min = -7000,
+					max = 7000,
+					description = "Целевая координата X",
+				},
+				z = {
+					type = "integer",
+					required = true,
+					min = -7000,
+					max = 7000,
+					description = "Целевая координата Z",
+				},
+				speed = {
+					type = "integer",
+					required = false,
+					min = 1,
+					max = 10,
+					description = "Скорость перемещения: 10 — максимальная (по умолчанию), 1 — в 10 раз медленнее",
+				},
+			},
+		},
+		{
 			name = "pause",
 			description = "Подождать N секунд",
 			params = {
@@ -335,6 +362,34 @@ function CommandEngine:_validateMove(payload, axis)
 	return true, value, speed
 end
 
+function CommandEngine:_validateMoveTo(payload)
+	local x = payload and payload.x
+	local z = payload and payload.z
+	if typeof(x) ~= "number" or x % 1 ~= 0 then
+		return false, "param 'x' must be an integer"
+	end
+	if x < -7000 or x > 7000 then
+		return false, "param 'x' out of range [-7000, 7000]"
+	end
+	if typeof(z) ~= "number" or z % 1 ~= 0 then
+		return false, "param 'z' must be an integer"
+	end
+	if z < -7000 or z > 7000 then
+		return false, "param 'z' out of range [-7000, 7000]"
+	end
+
+	local speed = payload and payload.speed
+	if speed == nil then
+		speed = 10
+	elseif typeof(speed) ~= "number" or speed % 1 ~= 0 then
+		return false, "param 'speed' must be an integer"
+	elseif speed < 1 or speed > 10 then
+		return false, "param 'speed' out of range [1, 10]"
+	end
+
+	return true, x, z, speed
+end
+
 function CommandEngine:_moveAxis(axis, payload)
 	local ok, value, speed = self:_validateMove(payload, axis)
 	if not ok then
@@ -406,6 +461,81 @@ function CommandEngine:_moveAxis(axis, payload)
 		finalPos = Vector3.new(pos.X, pos.Y, finalValue)
 	end
 	hrp.CFrame = CFrame.new(finalPos) * CFrame.Angles(0, startYaw, 0)
+
+	return {
+		success = true,
+		data = {
+			newPosition = {
+				x = math.round(hrp.Position.X * 10) / 10,
+				y = math.round(hrp.Position.Y * 10) / 10,
+				z = math.round(hrp.Position.Z * 10) / 10,
+			},
+		},
+	}
+end
+
+function CommandEngine:_moveTo(payload)
+	local ok, x, z, speed = self:_validateMoveTo(payload)
+	if not ok then
+		return { success = false, error = x }
+	end
+
+	local hrp = self:_getHrp()
+	if not hrp then
+		return { success = false, error = "HumanoidRootPart not found" }
+	end
+
+	if self:_isCancelled() then
+		return { success = false, error = "cancelled" }
+	end
+
+	local pos = hrp.Position
+	local startX = pos.X
+	local startZ = pos.Z
+	local _, startYaw = hrp.CFrame:ToEulerAnglesYXZ()
+
+	local dx = x - startX
+	local dz = z - startZ
+	local dist = math.sqrt(dx * dx + dz * dz)
+	if dist < 0.1 then
+		hrp.CFrame = CFrame.new(Vector3.new(x, pos.Y, z)) * CFrame.Angles(0, startYaw, 0)
+		return {
+			success = true,
+			data = {
+				newPosition = {
+					x = math.round(hrp.Position.X * 10) / 10,
+					y = math.round(hrp.Position.Y * 10) / 10,
+					z = math.round(hrp.Position.Z * 10) / 10,
+				},
+			},
+		}
+	end
+
+	local baseStep = 4
+	local baseWait = 0.02
+	local stepSize = baseStep * (speed / 10)
+	local waitTime = baseWait
+	local steps = math.max(1, math.floor(dist / stepSize))
+	local stepX = dx / steps
+	local stepZ = dz / steps
+
+	for i = 1, steps do
+		if self:_isCancelled() then
+			return { success = false, error = "cancelled" }
+		end
+
+		local newX = startX + stepX * i
+		local newZ = startZ + stepZ * i
+		local newPos = Vector3.new(newX, pos.Y, newZ)
+		hrp.CFrame = CFrame.new(newPos) * CFrame.Angles(0, startYaw, 0)
+		task.wait(waitTime)
+	end
+
+	if self:_isCancelled() then
+		return { success = false, error = "cancelled" }
+	end
+
+	hrp.CFrame = CFrame.new(Vector3.new(x, pos.Y, z)) * CFrame.Angles(0, startYaw, 0)
 
 	return {
 		success = true,
@@ -781,6 +911,8 @@ function CommandEngine:execute(command)
 		result = self:_moveAxis("y", payload)
 	elseif name == "move_z" then
 		result = self:_moveAxis("z", payload)
+	elseif name == "move_to" then
+		result = self:_moveTo(payload)
 	elseif name == "pause" then
 		result = self:_pause(payload)
 	elseif name == "respawn" then

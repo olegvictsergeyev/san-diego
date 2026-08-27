@@ -137,6 +137,14 @@ POST /commands/{id}/status
       }
     },
     {
+      "name": "move_to",
+      "params": {
+        "x": { "type": "number", "min": -7000, "max": 7000 },
+        "z": { "type": "number", "min": -7000, "max": 7000 },
+        "speed": { "type": "number", "min": 1, "max": 10 }
+      }
+    },
+    {
       "name": "respawn",
       "params": {}
     },
