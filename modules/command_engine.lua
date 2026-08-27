@@ -178,6 +178,11 @@ function CommandEngine:getCommandsSpec()
 			params = {},
 		},
 		{
+			name = "jump",
+			description = "Подпрыгнуть",
+			params = {},
+		},
+		{
 			name = "cancel",
 			description = "Отменить текущую команду",
 			params = {},
@@ -448,6 +453,20 @@ function CommandEngine:_respawn()
 	end
 	humanoid.Health = 0
 	return { success = true, data = { respawned = true } }
+end
+
+function CommandEngine:_jumpCommand()
+	local humanoid = self:_getHumanoid()
+	if not humanoid then
+		return { success = false, error = "Humanoid not found" }
+	end
+	if humanoid.Health <= 0 then
+		return { success = false, error = "Humanoid is dead" }
+	end
+	pcall(function()
+		humanoid.Jump = true
+	end)
+	return { success = true, data = { jumped = true } }
 end
 
 function CommandEngine:_validateTurn(payload)
@@ -763,6 +782,8 @@ function CommandEngine:execute(command)
 		result = self:_pause(payload)
 	elseif name == "respawn" then
 		result = self:_respawn()
+	elseif name == "jump" then
+		result = self:_jumpCommand()
 	elseif name == "turn" then
 		result = self:_turnCommand(payload)
 	elseif name == "turn_with_camera" then

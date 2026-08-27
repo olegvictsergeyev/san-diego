@@ -141,6 +141,10 @@ POST /commands/{id}/status
       "params": {}
     },
     {
+      "name": "jump",
+      "params": {}
+    },
+    {
       "name": "turn",
       "params": {
         "degrees": { "type": "number", "min": 0, "max": 360 },
