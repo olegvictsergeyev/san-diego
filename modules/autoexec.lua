@@ -32,14 +32,22 @@ function Autoexec:install(loaderUrl)
 	local code = self:_makeLoaderCode(loaderUrl)
 
 	for _, path in ipairs(CANDIDATES) do
+		local exists, existsErr = pcall(function()
+			return isfile(path)
+		end)
+		if exists then
+			print("[SanDiegoAgent][Autoexec] already installed at " .. path)
+			return path
+		end
+
 		local ok = pcall(function()
 			writefile(path, code)
 		end)
 		if ok then
-			local exists = pcall(function()
+			local verify, verifyErr = pcall(function()
 				return isfile(path)
 			end)
-			if exists then
+			if verify then
 				print("[SanDiegoAgent][Autoexec] installed at " .. path)
 				return path
 			end

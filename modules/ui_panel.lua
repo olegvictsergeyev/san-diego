@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "1.0.2",
+    version = "1.0.3",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -190,7 +190,8 @@ end
 local function startAgent()
     if currentAgent then
         currentAgent:stop()
-        task.wait(0.2)
+        currentAgent = nil
+        getgenv().SanDiegoAgentRunning = nil
     end
     currentAgent = makeAgent()
     currentAgent:start()
@@ -203,6 +204,7 @@ local function stopAgent()
         currentAgent:stop()
         currentAgent = nil
     end
+    getgenv().SanDiegoAgentRunning = nil
 end
 
 local function getPosition()

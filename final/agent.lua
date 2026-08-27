@@ -8,6 +8,12 @@
         getgenv().StopSanDiegoAgent = true
 ]]
 
+if getgenv().SanDiegoAgentRunning then
+    warn("[SanDiegoAgent] already running, skipping duplicate start")
+    return
+end
+getgenv().SanDiegoAgentRunning = true
+
 local BASE_URL = getgenv().SanDiegoAgentBaseUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main"
 local UI_PANEL_URL = BASE_URL .. "/modules/ui_panel.lua?nocache=" .. tostring(tick())
 
@@ -24,5 +30,12 @@ local function loadUiPanel()
     end
 end
 
-local UIPanel = loadUiPanel()
-UIPanel.run()
+local ok, result = pcall(function()
+    local UIPanel = loadUiPanel()
+    UIPanel.run()
+end)
+
+if not ok then
+    warn("[SanDiegoAgent] failed to start: " .. tostring(result))
+    getgenv().SanDiegoAgentRunning = nil
+end
