@@ -46,6 +46,8 @@ function Agent.new(config, httpClient, stateCollector, commandEngine, afk)
 	self.lastCommandResult = nil
 	self.currentCommand = nil
 	self.commandQueue = {}
+	self.lastStatusData = nil
+	self.lastStatusSendAt = 0
 
 	return self
 end
@@ -55,13 +57,16 @@ function Agent:_log(level, ...)
 	print(string.format("[SanDiegoAgent][%s] %s", level, msg))
 end
 
-function Agent:_sendStatus()
+function Agent:_sendStatus(force)
 	local data = self.state:getAll(self.config.customData)
-	if self.lastStatusData and deepEqual(self.lastStatusData, data) then
+	local changed = not self.lastStatusData or not deepEqual(self.lastStatusData, data)
+	local heartbeatDue = (tick() - self.lastStatusSendAt) >= 300
+	if not changed and not force and not heartbeatDue then
 		self:_log("INFO", "status skipped: no changes")
 		return
 	end
 	self.lastStatusData = data
+	self.lastStatusSendAt = tick()
 	local ok, res = self.http:post("/game/update", data)
 	if ok then
 		self:_log("INFO", "status sent", res.statusCode)
