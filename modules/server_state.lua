@@ -28,6 +28,7 @@ function ServerState:save(placeId, jobId)
 			placeId = tostring(placeId or game.PlaceId),
 			jobId = tostring(jobId),
 			code = saved.code or nil,
+			reconnectPending = true,
 			savedAt = tick(),
 		})
 	end)
@@ -51,6 +52,7 @@ function ServerState:savePrivateCode(code)
 			placeId = saved.placeId or tostring(game.PlaceId),
 			jobId = saved.jobId or nil,
 			code = code,
+			reconnectPending = false,
 			savedAt = tick(),
 		})
 	end)

@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "1.1.0",
+    version = "1.1.1",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -124,6 +124,12 @@ local function ensureCorrectServer()
 		return true
 	end
 
+	-- Телепорт/reconnect делаем только если был зафиксирован дисконнект.
+	if not saved.reconnectPending then
+		serverState:clear()
+		return true
+	end
+
 	local currentJobId = tostring(game.JobId)
 
 	-- Уже на нужном сервере — сбрасываем сохранение.
@@ -162,7 +168,7 @@ local function ensureCorrectServer()
 	local jobId = tostring(saved.jobId)
 	warn("[SanDiegoAgent][ServerGuard] current server does not match saved " .. currentJobId .. ", teleporting to " .. jobId)
 
-	local loaderCode = 'getgenv().SanDiegoAgentBaseUrl = "' .. (getgenv().SanDiegoAgentBaseUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main") .. '"\ngetgenv().SanDiegoAgentRunning = true\nloadstring(game:HttpGet("' .. CONFIG.agentLoaderUrl .. '?nocache=" .. tostring(tick())))()'
+	local loaderCode = 'getgenv().SanDiegoAgentBaseUrl = "' .. (getgenv().SanDiegoAgentBaseUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main") .. '"\nloadstring(game:HttpGet("' .. CONFIG.agentLoaderUrl .. '?nocache=" .. tostring(tick())))()'
 	Compat.queueOnTeleport(loaderCode)
 
 	local TeleportService = game:GetService("TeleportService")

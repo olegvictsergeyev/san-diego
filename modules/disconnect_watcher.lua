@@ -149,7 +149,7 @@ function DisconnectWatcher:_queueReload()
 		return
 	end
 	local baseUrl = tostring(self.loaderUrl):match("(.+)/final/agent%.lua$") or self.loaderUrl
-	local code = 'local baseUrl = "' .. baseUrl .. '"\ngetgenv().SanDiegoAgentBaseUrl = baseUrl\ngetgenv().SanDiegoAgentRunning = true\nlocal ok, err = pcall(function()\n    loadstring(game:HttpGet(baseUrl .. "/final/agent.lua?nocache=" .. tostring(tick())))()\nend)\nif not ok then\n    warn("[SanDiegoAgent][DisconnectWatcher] reload failed: " .. tostring(err))\nend'
+	local code = 'local baseUrl = "' .. baseUrl .. '"\ngetgenv().SanDiegoAgentBaseUrl = baseUrl\nlocal ok, err = pcall(function()\n    loadstring(game:HttpGet(baseUrl .. "/final/agent.lua?nocache=" .. tostring(tick())))()\nend)\nif not ok then\n    warn("[SanDiegoAgent][DisconnectWatcher] reload failed: " .. tostring(err))\nend'
 	if self.compat and self.compat.queueOnTeleport then
 		self.compat.queueOnTeleport(code)
 	else
