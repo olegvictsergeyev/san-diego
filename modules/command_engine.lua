@@ -464,7 +464,10 @@ function CommandEngine:_jumpCommand()
 		return { success = false, error = "Humanoid is dead" }
 	end
 	pcall(function()
+		humanoid.PlatformStand = false
+		humanoid.Sit = false
 		humanoid.Jump = true
+		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 	end)
 	return { success = true, data = { jumped = true } }
 end

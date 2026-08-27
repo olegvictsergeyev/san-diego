@@ -101,7 +101,10 @@ function Afk:_doJump()
 	if humanoid:GetState() == Enum.HumanoidStateType.Dead then return end
 
 	pcall(function()
+		humanoid.PlatformStand = false
+		humanoid.Sit = false
 		humanoid.Jump = true
+		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 	end)
 end
 
