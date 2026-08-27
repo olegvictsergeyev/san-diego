@@ -1,5 +1,25 @@
 local HttpService = game:GetService("HttpService")
 
+local function deepEqual(a, b)
+	if typeof(a) ~= typeof(b) then
+		return false
+	end
+	if typeof(a) ~= "table" then
+		return a == b
+	end
+	for k, v in pairs(a) do
+		if not deepEqual(v, b[k]) then
+			return false
+		end
+	end
+	for k, v in pairs(b) do
+		if not deepEqual(v, a[k]) then
+			return false
+		end
+	end
+	return true
+end
+
 local Agent = {}
 Agent.__index = Agent
 
@@ -37,6 +57,11 @@ end
 
 function Agent:_sendStatus()
 	local data = self.state:getAll(self.config.customData)
+	if self.lastStatusData and deepEqual(self.lastStatusData, data) then
+		self:_log("INFO", "status skipped: no changes")
+		return
+	end
+	self.lastStatusData = data
 	local ok, res = self.http:post("/game/update", data)
 	if ok then
 		self:_log("INFO", "status sent", res.statusCode)

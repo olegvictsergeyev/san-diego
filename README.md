@@ -97,7 +97,7 @@ san-diego/
 Все настройки в начале `final/agent.lua`:
 - `baseUrl` — URL существующего сервиса.
 - `gameSlug` — идентификатор игры (`san-diego`).
-- `statusInterval` — интервал отправки статуса в секундах (рекомендуется 5–10).
+- `statusInterval` — интервал проверки изменений статуса в секундах (рекомендуется 5–10). `POST /game/update` отправляется только если данные изменились.
 - `balancePath` — путь к балансу, например `"leaderstats.Cash"`.
 - `useRemoteModules` — `true` для загрузки модулей по raw-URL, `false` для локального `require`.
 - `afkEnabled` — `true` для включения периодического AFK-действия.
