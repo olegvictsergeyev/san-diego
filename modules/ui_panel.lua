@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "1.1.1",
+    version = "1.2.0",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -22,10 +22,10 @@ local CONFIG = {
     statusInterval = 7,
 
     -- Long-poll таймаут при получении команд (секунды)
-    commandPollTimeout = 55,
+    commandPollTimeout = 30,
 
     -- Пауза перед повторным запросом при ошибке (секунды)
-    commandRetryDelay = 2,
+    commandRetryDelay = 3,
 
     -- Путь к балансу в иерархии LocalPlayer
     balancePath = "leaderstats.Cash",

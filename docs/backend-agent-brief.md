@@ -53,30 +53,34 @@ Tracked-поля для игры `san-diego`:
 
 Long-poll. Query-параметры:
 - `nickname` (обязательно)
-- `game_slug` (обязательно)
-- `last_id` (опционально) — ID предыдущей команды
-- `last_status` (опционально) — финальный статус предыдущей команды
+- `long_poll=true` (обязательно)
+- `timeout` (опционально) — максимальное время ожидания в секундах, 1..300, по умолчанию 30.
 
 Поведение:
-- Держать соединение до появления команды (таймаут 25–55 сек).
-- Если есть `pending`-команда для этого `nickname` + `game_slug` — перевести в `in_progress` и вернуть (`200`).
-- Если есть `in_progress`-команда — вернуть её, чтобы агент мог продолжить после реконнекта.
-- Если `last_id` + `last_status` переданы — обновить предыдущую команду.
-- Если команд нет — `204 No Content`.
+- Удерживать соединение до появления команды или таймаута.
+- Возвращает одну команду в статусе `in_progress` с полем `taken_at`.
+- Возвращает `null` при таймауте.
+- После ответа агент сразу открывает новый long poll.
 
-### `POST /commands/{id}/status`
+### `POST /commands/{id}/result`
 
 Тело:
 ```json
 {
-  "status": "in_progress" | "completed" | "error" | "cancelled",
-  "message": "optional"
+  "result": "JSON-строка или текстовое описание результата",
+  "status": "completed" | "error" | "cancelled"
 }
 ```
 
-### `POST /commands/{id}/result`
+### `POST /commands/{id}/status` (опционально)
 
-Тело — произвольный JSON с результатом выполнения.
+Тело:
+```json
+{
+  "status": "in_progress" | "completed" | "error" | "cancelled" | "declined",
+  "message": "optional"
+}
+```
 
 ## Поддерживаемые команды
 
@@ -92,18 +96,19 @@ Long-poll. Query-параметры:
 
 ## Жизненный цикл команды
 
-1. Агент получает команду через `GET /commands/next`.
-2. Агент отправляет `POST /commands/{id}/status` со статусом `in_progress`.
+1. Агент открывает long poll `GET /commands/next`.
+2. Сервер выдаёт команду в статусе `in_progress` с полем `taken_at`.
 3. Агент выполняет команду.
-4. Агент отправляет `POST /commands/{id}/result`.
-5. Агент отправляет `POST /commands/{id}/status` со статусом `completed` или `error`.
+4. Агент отправляет `POST /commands/{id}/result` с `result` (строка) и `status`.
+5. Если результат не пришёл в течение 5 минут, сервер автоматически переводит команду в `declined`.
+6. При необходимости агент отправляет `POST /commands/{id}/status` (например, для отмены).
 
 ## Отмена
 
 Команда `cancel`:
 1. Прерывает текущую команду.
 2. Текущая команда получает статус `cancelled`.
-3. Сама команда `cancel` получает статус `completed`.
+3. Сама команда `cancel` завершается статусом `completed`.
 
 ## Требования
 

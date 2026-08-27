@@ -25,8 +25,11 @@ san-diego/
 1. Создайте игру и tracked-поля:
    ```bash
    POST /games { "name": "San Diego", "slug": "san-diego" }
-   POST /games/{id}/fields { "name": "location", "field_type": "string" }
+   POST /games/{id}/fields { "name": "position_x", "field_type": "number" }
+   POST /games/{id}/fields { "name": "position_y", "field_type": "number" }
+   POST /games/{id}/fields { "name": "position_z", "field_type": "number" }
    POST /games/{id}/fields { "name": "team", "field_type": "string" }
+   POST /games/{id}/fields { "name": "balance", "field_type": "number" }
    ```
 
    Формат `POST /game/update`:

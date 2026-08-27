@@ -67,40 +67,28 @@ Tracked-поля для `san-diego`:
 - `completed` — команда выполнена успешно.
 - `error` — при выполнении произошла ошибка.
 - `cancelled` — команда отменена.
+- `declined` — команда зависла: агент не прислал результат в течение 5 минут.
 
 ## Endpoint'ы
 
 ### 1. Long-poll следующей команды
 
 ```
-GET /commands/next?nickname={nickname}
+GET /commands/next?nickname={nickname}&long_poll=true&timeout=30
 ```
 
 Поведение:
-- Передаётся **только** `nickname`.
-- Сервер возвращает одну команду для данного nickname/place или пустой ответ при таймауте.
+- Передаётся `nickname`, `long_poll=true` и `timeout` (секунды, 1..300).
+- Сервер удерживает соединение до `timeout` секунд и возвращает одну команду, либо `null` при таймауте.
+- После получения команды или таймаута агент сразу открывает новый long poll.
 - `game_slug`, `last_id`, `last_status` не передаются.
 
 Ответы:
 - `200 OK` + тело команды — есть команда.
-- `204 No Content` — нет команд.
+- `200 OK` + `null` — таймаут, команд нет.
 - `400 Bad Request` — отсутствует `nickname`.
 
-### 2. Обновление статуса команды
-
-```
-POST /commands/{id}/status
-```
-
-Тело:
-```json
-{
-  "status": "in_progress" | "completed" | "error" | "cancelled",
-  "message": "optional human-readable message"
-}
-```
-
-### 3. Отправка результата выполнения
+### 2. Отправка результата выполнения
 
 ```
 POST /commands/{id}/result
@@ -110,14 +98,31 @@ POST /commands/{id}/result
 ```json
 {
   "result": "JSON-строка или текстовое описание результата",
-  "status": "completed" | "error"
+  "status": "completed" | "error" | "cancelled"
 }
 ```
 
 Правила:
-- `result` — всегда строка.
+- `result` — строка, опционально.
+- `status` — обязательно.
 - Для `get_commands` `result` должен быть JSON-строкой, которая декодируется в объект `{ commands: [...] }`.
 - Без обёртки `{ success, data }`.
+
+### 3. Альтернативное обновление статуса (опционально)
+
+```
+POST /commands/{id}/status
+```
+
+Тело:
+```json
+{
+  "status": "in_progress" | "completed" | "error" | "cancelled" | "declined",
+  "message": "optional human-readable message"
+}
+```
+
+Используется, например, для отмены текущей команды.
 
 ## Формат ответа на `get_commands`
 
@@ -179,11 +184,11 @@ POST /commands/{id}/result
 ## Порядок взаимодействия
 
 1. Агент при старте отправляет `POST /game/update` с `place_id`, `server_id`, `version`.
-2. Сервер при необходимости создаёт команду `get_commands`.
-3. Агент получает `get_commands` и отвечает JSON-строкой со списком команд.
-4. Сервер отправляет обычные команды через `GET /commands/next`.
-5. Агент выполняет команду и отправляет `POST /commands/{id}/result`.
-6. При необходимости агент обновляет статус через `POST /commands/{id}/status`.
+2. Агент начинает long poll `GET /commands/next?nickname=...&long_poll=true&timeout=30`.
+3. Сервер отдаёт команду в статусе `in_progress` с полем `taken_at`.
+4. Агент выполняет команду и отправляет `POST /commands/{id}/result`.
+5. При необходимости агент отправляет `POST /commands/{id}/status` (например, для отмены).
+6. Если за 5 минут результат не получен, сервер сам переводит команду в `declined`.
 
 ## Логика отмены
 
@@ -193,12 +198,7 @@ POST /commands/{id}/result
 
 ## Требования к реализации
 
-1. Использовать тот же стек, что и существующий сервис.
-2. Сохранить совместимость с `POST /game/update`.
-3. Добавить схемы/миграции для сущностей `Command` и `Job`.
-4. Предоставить OpenAPI/Swagger-документацию для новых endpoint'ов.
-5. Обеспечить атомарность выдачи команды: одну `pending` команду может забрать только один аккаунт.
-6. Реализовать long-poll с разумным таймаутом (25–55 секунд).
-7. Идентифицировать персонажа по `nickname` + `place_id`.
-8. Хранить `server_id` (`JobId`) как отдельную сущность, привязанную к `place_id`.
-9. При изменении версии или появлении нового `place_id` запрашивать `get_commands`.
+1. Использовать long polling вместо коротких запросов.
+2. Отправлять `nickname` в каждом запросе `GET /commands/next`.
+3. Отправлять результат через `POST /commands/{id}/result` с полями `result` (строка) и `status`.
+4. Присылать heartbeat `POST /game/update` при старте, изменениях и раз в 5 минут.

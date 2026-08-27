@@ -30,6 +30,8 @@ function Agent.new(config, httpClient, stateCollector, commandEngine, afk)
 		baseUrl = config.baseUrl or "http://195.161.68.193:5173/api",
 		gameSlug = config.gameSlug or "san-diego",
 		statusInterval = config.statusInterval or 5,
+		commandPollTimeout = config.commandPollTimeout or 30,
+		commandRetryDelay = config.commandRetryDelay or 3,
 		balancePath = config.balancePath or "leaderstats.Cash",
 		customData = config.customData or {},
 	}
@@ -40,10 +42,6 @@ function Agent.new(config, httpClient, stateCollector, commandEngine, afk)
 	self.afk = afk
 
 	self.running = false
-	self.lastCommandId = nil
-	self.lastCommandStatus = nil
-	self.lastCommandMessage = nil
-	self.lastCommandResult = nil
 	self.currentCommand = nil
 	self.commandQueue = {}
 	self.lastStatusData = nil
@@ -95,22 +93,7 @@ function Agent:clearDisconnect()
 	self:_sendStatus()
 end
 
-function Agent:_updateCommandStatus(commandId, status, message)
-	if not commandId then return end
-	local body = { status = status }
-	if message then
-		body.message = message
-	end
-	local ok, res = self.http:post("/commands/" .. tostring(commandId) .. "/status", body)
-	if ok then
-		self:_log("INFO", "command status updated", commandId, status, res.statusCode)
-	else
-		self:_log("ERROR", "command status update failed:", commandId, tostring(res))
-	end
-end
-
 function Agent:_resultToString(result)
-	local HttpService = game:GetService("HttpService")
 	if typeof(result) == "string" then
 		return result
 	end
@@ -142,35 +125,37 @@ function Agent:_sendCommandResult(commandId, result, status)
 	local body = { result = resultString, status = status }
 	local ok, res = self.http:post("/commands/" .. tostring(commandId) .. "/result", body)
 	if ok then
-		self:_log("INFO", "command result sent", commandId, res.statusCode)
+		self:_log("INFO", "command result sent", commandId, status, res.statusCode)
 	else
 		self:_log("ERROR", "command result send failed:", commandId, tostring(res))
 	end
 end
 
-function Agent:_finishCommand(commandId, status, result)
-	self.lastCommandId = commandId
-	self.lastCommandStatus = status
-	self.lastCommandMessage = result.error or result.message
-	self.lastCommandResult = result
-
-	self:_sendCommandResult(commandId, result, status)
-end
-
-function Agent:_reportLastCommandAndClear()
-	if self.lastCommandId and self.lastCommandStatus and self.lastCommandResult then
-		self:_finishCommand(self.lastCommandId, self.lastCommandStatus, self.lastCommandResult)
-		self.lastCommandId = nil
-		self.lastCommandStatus = nil
-		self.lastCommandMessage = nil
-		self.lastCommandResult = nil
+function Agent:_updateCommandStatus(commandId, status, message)
+	if not commandId then return end
+	local body = { status = status }
+	if message then
+		body.message = message
+	end
+	local ok, res = self.http:post("/commands/" .. tostring(commandId) .. "/status", body)
+	if ok then
+		self:_log("INFO", "command status updated", commandId, status, res.statusCode)
+	else
+		self:_log("ERROR", "command status update failed:", commandId, tostring(res))
 	end
 end
 
 function Agent:_fetchNextCommand()
 	local nickname = self.state:getNickname()
+	if not nickname or nickname == "unknown" then
+		self:_log("ERROR", "cannot poll commands: nickname unknown")
+		return nil
+	end
+
 	local query = {
 		nickname = nickname,
+		long_poll = true,
+		timeout = self.config.commandPollTimeout,
 	}
 
 	local ok, res = self.http:get("/commands/next", query)
@@ -179,6 +164,7 @@ function Agent:_fetchNextCommand()
 		return nil
 	end
 
+	-- Long poll таймаут: сервер возвращает 200 + null (или 204).
 	if res.statusCode == 204 or not res.body then
 		return nil
 	end
@@ -197,7 +183,7 @@ function Agent:_fetchNextCommand()
 	command.name = command.command_type or command.name
 	if typeof(command.payload) == "string" and command.payload ~= "" then
 		local parseOk, parsed = pcall(function()
-			return game:GetService("HttpService"):JSONDecode(command.payload)
+			return HttpService:JSONDecode(command.payload)
 		end)
 		if parseOk then
 			command.payload = parsed
@@ -211,7 +197,6 @@ function Agent:_handleCommand(command)
 	self.currentCommand = command
 	local startedAt = os.time()
 	self.state:setCommandState("in_progress", command.name, startedAt)
-	self:_updateCommandStatus(command.id, "in_progress")
 
 	local ok, result = pcall(function()
 		return self.engine:execute(command)
@@ -229,19 +214,14 @@ function Agent:_handleCommand(command)
 		status = "cancelled"
 	end
 
-	if status == "cancelled" then
-		-- статус cancelled уже отправлен в _handleCancel, отправляем только result
-		self.lastCommandId = command.id
-		self.lastCommandStatus = "cancelled"
-		self.lastCommandMessage = result.error
-		self.lastCommandResult = result
+	if status == "error" then
+		self:_sendCommandResult(command.id, result, "error")
+		self.state:setCommandState("error", command.name, startedAt)
+	elseif status == "cancelled" then
 		self:_sendCommandResult(command.id, result, "cancelled")
 		self.state:setCommandState("idle", nil, nil)
-	elseif status == "error" then
-		self:_finishCommand(command.id, status, result)
-		self.state:setCommandState("error", command.name, startedAt)
 	else
-		self:_finishCommand(command.id, status, result)
+		self:_sendCommandResult(command.id, result, "completed")
 		self.state:setCommandState("idle", nil, nil)
 	end
 
@@ -258,13 +238,18 @@ function Agent:_handleCancel(command)
 	end
 	local resultData = {}
 	if cancelledId then resultData.cancelledCommandId = cancelledId end
-	self:_finishCommand(command.id, "completed", { success = true, data = resultData })
+	self:_sendCommandResult(command.id, { success = true, data = resultData }, "completed")
 end
 
 function Agent:_fetcherLoop()
 	while self.running do
-		local command = self:_fetchNextCommand()
-		if command then
+		local ok, command = pcall(function()
+			return self:_fetchNextCommand()
+		end)
+		if not ok then
+			self:_log("ERROR", "fetcher loop error:", tostring(command))
+			task.wait(self.config.commandRetryDelay)
+		elseif command then
 			self:_log("INFO", "fetched command", command.id, command.name)
 			if command.name == "cancel" then
 				self:_handleCancel(command)
@@ -272,7 +257,7 @@ function Agent:_fetcherLoop()
 				table.insert(self.commandQueue, command)
 			end
 		else
-			task.wait(1)
+			-- Таймаут long poll — сразу новый запрос.
 		end
 	end
 end
@@ -281,7 +266,13 @@ function Agent:_workerLoop()
 	while self.running do
 		if #self.commandQueue > 0 then
 			local command = table.remove(self.commandQueue, 1)
-			self:_handleCommand(command)
+			local ok, err = pcall(function()
+				self:_handleCommand(command)
+			end)
+			if not ok then
+				self:_log("ERROR", "worker loop error:", tostring(err))
+				self:_sendCommandResult(command.id, { success = false, error = tostring(err) }, "error")
+			end
 		else
 			task.wait(0.1)
 		end
@@ -302,44 +293,6 @@ function Agent:_statusLoop()
 	end
 end
 
-function Agent:_fetcherLoop()
-	while self.running do
-		local ok, command = pcall(function()
-			return self:_fetchNextCommand()
-		end)
-		if not ok then
-			self:_log("ERROR", "fetcher loop error:", tostring(command))
-			task.wait(1)
-		elseif command then
-			self:_log("INFO", "fetched command", command.id, command.name)
-			if command.name == "cancel" then
-				self:_handleCancel(command)
-			else
-				table.insert(self.commandQueue, command)
-			end
-		else
-			task.wait(1)
-		end
-	end
-end
-
-function Agent:_workerLoop()
-	while self.running do
-		if #self.commandQueue > 0 then
-			local command = table.remove(self.commandQueue, 1)
-			local ok, err = pcall(function()
-				self:_handleCommand(command)
-			end)
-			if not ok then
-				self:_log("ERROR", "worker loop error:", tostring(err))
-				self:_finishCommand(command.id, "error", { success = false, error = tostring(err) })
-			end
-		else
-			task.wait(0.1)
-		end
-	end
-end
-
 function Agent:start()
 	if self.running then
 		self:_log("WARN", "agent already running")
@@ -349,7 +302,6 @@ function Agent:start()
 	self.running = true
 	self:_log("INFO", "starting agent for game", self.config.gameSlug)
 
-	self:_reportLastCommandAndClear()
 	self:_sendStatus()
 
 	task.spawn(function()
@@ -366,7 +318,6 @@ function Agent:start()
 
 	if self.afk then
 		local afk = self.afk
-		-- Связываем проверку занятости: AFK не мешает выполнению команд.
 		afk:setBusyCheck(function()
 			return self.currentCommand ~= nil
 		end)

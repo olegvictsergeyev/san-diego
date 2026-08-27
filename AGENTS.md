@@ -44,7 +44,9 @@
 
 1. Если backend меняет формат запроса/ответа, сначала согласовать изменения с backend-разработчиком.
 2. Обновить `modules/http_client.lua`, `modules/agent.lua` и `docs/agent-commands-api-prompt.md`.
-3. Проверить обратную совместимость.
+3. Long polling `/commands/next` использует query-параметры `nickname`, `long_poll=true`, `timeout=30`.
+4. Результат команды отправляется через `POST /commands/{id}/result` с полями `result` (строка) и `status`.
+5. Проверить обратную совместимость.
 
 ## 3. При изменении UI/UX
 
