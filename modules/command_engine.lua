@@ -348,6 +348,7 @@ function CommandEngine:_moveAxis(axis, payload)
 	local pos = hrp.Position
 	local startValue = pos[axis]
 	local sign = value >= 0 and 1 or -1
+	local _, startYaw = hrp.CFrame:ToEulerAnglesYXZ()
 
 	-- Базовые шаги подобраны для плавности (max speed = прежняя скорость):
 	-- X/Z: 4 студии за шаг, пауза 0.02 с.
@@ -382,7 +383,7 @@ function CommandEngine:_moveAxis(axis, payload)
 		else
 			newPos = Vector3.new(pos.X, pos.Y, current)
 		end
-		hrp.CFrame = CFrame.new(newPos)
+		hrp.CFrame = CFrame.new(newPos) * CFrame.Angles(0, startYaw, 0)
 		task.wait(waitTime)
 	end
 
@@ -399,7 +400,7 @@ function CommandEngine:_moveAxis(axis, payload)
 	else
 		finalPos = Vector3.new(pos.X, pos.Y, finalValue)
 	end
-	hrp.CFrame = CFrame.new(finalPos)
+	hrp.CFrame = CFrame.new(finalPos) * CFrame.Angles(0, startYaw, 0)
 
 	return {
 		success = true,
