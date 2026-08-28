@@ -192,6 +192,12 @@ POST /commands/{id}/status
         "enabled": { "type": "string", "min": 2, "max": 5 },
         "interval": { "type": "number", "min": 60, "max": 3600 }
       }
+    },
+    {
+      "name": "set_team",
+      "params": {
+        "team": { "type": "string", "min": 1, "max": 32 }
+      }
     }
   ]
 }

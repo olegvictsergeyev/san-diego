@@ -255,6 +255,19 @@ function CommandEngine:getCommandsSpec()
 			},
 		},
 		{
+			name = "set_team",
+			description = "Сменить команду (team) персонажа",
+			params = {
+				team = {
+					type = "string",
+					required = true,
+					min = 1,
+					max = 32,
+					description = "Имя команды, например 'Police' или 'Civilian'",
+				},
+			},
+		},
+		{
 			name = "turn",
 			description = "Повернуть персонажа на указанный абсолютный угол (0..360)",
 			params = {
@@ -1091,6 +1104,45 @@ function CommandEngine:_afkCommand(payload)
 	}
 end
 
+function CommandEngine:_setTeamCommand(payload)
+	local teamName = payload and payload.team
+	if typeof(teamName) ~= "string" or #teamName == 0 or #teamName > 32 then
+		return { success = false, error = "param 'team' must be a non-empty string (1..32 chars)" }
+	end
+
+	local player = Players.LocalPlayer
+	if not player then
+		return { success = false, error = "LocalPlayer not found" }
+	end
+
+	local TeamsService = game:GetService("Teams")
+	local team
+	for _, t in ipairs(TeamsService:GetTeams()) do
+		if t.Name == teamName then
+			team = t
+			break
+		end
+	end
+
+	if not team then
+		return { success = false, error = "team not found: " .. teamName }
+	end
+
+	local ok, err = pcall(function()
+		player.Team = team
+	end)
+	if not ok then
+		return { success = false, error = "failed to set team: " .. tostring(err) }
+	end
+
+	return {
+		success = true,
+		data = {
+			team = teamName,
+		},
+	}
+end
+
 function CommandEngine:_joinPrivateServer(payload)
 	local code = payload and payload.code
 	if typeof(code) ~= "string" or code:gsub("%s+", "") == "" then
@@ -1137,6 +1189,8 @@ function CommandEngine:execute(command)
 		result = self:_cancelCurrent()
 	elseif name == "afk" then
 		result = self:_afkCommand(payload)
+	elseif name == "set_team" then
+		result = self:_setTeamCommand(payload)
 	else
 		result = { success = false, error = "unknown command: " .. tostring(name) }
 	end
