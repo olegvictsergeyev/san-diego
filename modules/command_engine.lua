@@ -33,20 +33,40 @@ function CommandEngine:_getPlayer()
 	return Players.LocalPlayer
 end
 
-function CommandEngine:_getCharacter()
+function CommandEngine:_getCharacter(timeout)
+	timeout = tonumber(timeout) or 5
 	local player = self:_getPlayer()
-	if not player then return nil end
-	local character = player.Character
-	if not character then
-		-- Дадим персонажу небольшое время на загрузку.
-		local ok, char = pcall(function()
-			return player.CharacterAdded:Wait()
-		end)
-		if ok then
-			character = char
-		end
+	if not player then
+		return nil
 	end
-	return character
+	local character = player.Character
+	if character then
+		return character
+	end
+
+	-- Ждём появления персонажа с таймаутом, чтобы не зависнуть навечно.
+	local start = tick()
+	local connection
+	local newCharacter = nil
+
+	connection = player.CharacterAdded:Connect(function(char)
+		newCharacter = char
+		if connection then
+			connection:Disconnect()
+			connection = nil
+		end
+	end)
+
+	while not newCharacter and tick() - start < timeout do
+		task.wait(0.05)
+	end
+
+	if connection then
+		connection:Disconnect()
+		connection = nil
+	end
+
+	return newCharacter
 end
 
 function CommandEngine:_getHrp()
@@ -482,6 +502,26 @@ function CommandEngine:_moveAxis(axis, payload)
 	local steps = math.floor(math.abs(value) / math.abs(stepSize))
 	local current = startValue
 
+	local function setHrpCFrame(cf)
+		if hrp and hrp.Parent then
+			local ok = pcall(function()
+				hrp.CFrame = cf
+			end)
+			if ok then
+				return true
+			end
+		end
+		-- Если HRP пропал (например, респавн), попробуем получить новый.
+		hrp = self:_getHrp()
+		if hrp then
+			local ok = pcall(function()
+				hrp.CFrame = cf
+			end)
+			return ok
+		end
+		return false
+	end
+
 	for _ = 1, steps do
 		if self:_isCancelled() then
 			return { success = false, error = "cancelled" }
@@ -496,7 +536,9 @@ function CommandEngine:_moveAxis(axis, payload)
 		else
 			newPos = Vector3.new(pos.X, pos.Y, current)
 		end
-		hrp.CFrame = CFrame.new(newPos) * CFrame.Angles(0, startYaw, 0)
+		if not setHrpCFrame(CFrame.new(newPos) * CFrame.Angles(0, startYaw, 0)) then
+			return { success = false, error = "HumanoidRootPart lost during movement" }
+		end
 		task.wait(waitTime)
 	end
 
@@ -513,15 +555,18 @@ function CommandEngine:_moveAxis(axis, payload)
 	else
 		finalPos = Vector3.new(pos.X, pos.Y, finalValue)
 	end
-	hrp.CFrame = CFrame.new(finalPos) * CFrame.Angles(0, startYaw, 0)
+	if not setHrpCFrame(CFrame.new(finalPos) * CFrame.Angles(0, startYaw, 0)) then
+		return { success = false, error = "HumanoidRootPart lost during movement" }
+	end
 
+	local finalHrp = self:_getHrp()
 	return {
 		success = true,
 		data = {
 			newPosition = {
-				x = math.round(hrp.Position.X * 10) / 10,
-				y = math.round(hrp.Position.Y * 10) / 10,
-				z = math.round(hrp.Position.Z * 10) / 10,
+				x = math.round((finalHrp and finalHrp.Position.X or finalPos.X) * 10) / 10,
+				y = math.round((finalHrp and finalHrp.Position.Y or finalPos.Y) * 10) / 10,
+				z = math.round((finalHrp and finalHrp.Position.Z or finalPos.Z) * 10) / 10,
 			},
 		},
 	}
@@ -550,15 +595,38 @@ function CommandEngine:_moveTo(payload)
 	local dx = x - startX
 	local dz = z - startZ
 	local dist = math.sqrt(dx * dx + dz * dz)
+
+	local function setHrpCFrame(cf)
+		if hrp and hrp.Parent then
+			local ok = pcall(function()
+				hrp.CFrame = cf
+			end)
+			if ok then
+				return true
+			end
+		end
+		hrp = self:_getHrp()
+		if hrp then
+			local ok = pcall(function()
+				hrp.CFrame = cf
+			end)
+			return ok
+		end
+		return false
+	end
+
 	if dist < 0.1 then
-		hrp.CFrame = CFrame.new(Vector3.new(x, pos.Y, z)) * CFrame.Angles(0, startYaw, 0)
+		if not setHrpCFrame(CFrame.new(Vector3.new(x, pos.Y, z)) * CFrame.Angles(0, startYaw, 0)) then
+			return { success = false, error = "HumanoidRootPart lost" }
+		end
+		local finalHrp = self:_getHrp()
 		return {
 			success = true,
 			data = {
 				newPosition = {
-					x = math.round(hrp.Position.X * 10) / 10,
-					y = math.round(hrp.Position.Y * 10) / 10,
-					z = math.round(hrp.Position.Z * 10) / 10,
+					x = math.round((finalHrp and finalHrp.Position.X or x) * 10) / 10,
+					y = math.round((finalHrp and finalHrp.Position.Y or pos.Y) * 10) / 10,
+					z = math.round((finalHrp and finalHrp.Position.Z or z) * 10) / 10,
 				},
 			},
 		}
@@ -580,7 +648,9 @@ function CommandEngine:_moveTo(payload)
 		local newX = startX + stepX * i
 		local newZ = startZ + stepZ * i
 		local newPos = Vector3.new(newX, pos.Y, newZ)
-		hrp.CFrame = CFrame.new(newPos) * CFrame.Angles(0, startYaw, 0)
+		if not setHrpCFrame(CFrame.new(newPos) * CFrame.Angles(0, startYaw, 0)) then
+			return { success = false, error = "HumanoidRootPart lost during movement" }
+		end
 		task.wait(waitTime)
 	end
 
@@ -588,15 +658,18 @@ function CommandEngine:_moveTo(payload)
 		return { success = false, error = "cancelled" }
 	end
 
-	hrp.CFrame = CFrame.new(Vector3.new(x, pos.Y, z)) * CFrame.Angles(0, startYaw, 0)
+	if not setHrpCFrame(CFrame.new(Vector3.new(x, pos.Y, z)) * CFrame.Angles(0, startYaw, 0)) then
+		return { success = false, error = "HumanoidRootPart lost during movement" }
+	end
 
+	local finalHrp = self:_getHrp()
 	return {
 		success = true,
 		data = {
 			newPosition = {
-				x = math.round(hrp.Position.X * 10) / 10,
-				y = math.round(hrp.Position.Y * 10) / 10,
-				z = math.round(hrp.Position.Z * 10) / 10,
+				x = math.round((finalHrp and finalHrp.Position.X or x) * 10) / 10,
+				y = math.round((finalHrp and finalHrp.Position.Y or pos.Y) * 10) / 10,
+				z = math.round((finalHrp and finalHrp.Position.Z or z) * 10) / 10,
 			},
 		},
 	}
@@ -763,6 +836,14 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera, turnSpeed)
 	local targetYaw = math.rad(degrees)
 	local diff = self:_shortestAngleDiff(currentYaw, targetYaw)
 
+	local function ensureHrp()
+		if hrp and hrp.Parent then
+			return hrp
+		end
+		hrp = self:_getHrp()
+		return hrp
+	end
+
 	-- Начальный угол камеры может отличаться от угла персонажа.
 	-- Поворачиваем камеру плавно от её текущего положения к целевому.
 	local startCameraYaw = (camera and self:_getYaw(camera.CFrame)) or currentYaw
@@ -787,22 +868,29 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera, turnSpeed)
 	local releaseDuration = math.clamp(duration * 0.5, 0.5, 2.0)
 
 	local function cameraCFrameFromYaw(yaw)
+		if not (hrp and hrp.Parent) then
+			return nil
+		end
 		local fakeCf = CFrame.new(hrp.Position) * CFrame.Angles(0, yaw, 0)
 		local look = fakeCf.LookVector
 		return CFrame.new(hrp.Position - look * 10 + Vector3.new(0, 5, 0), hrp.Position + look * 10)
 	end
 
 	local function alignCamera()
-		if not (hrp and camera) then
+		if not camera then
 			return
 		end
 		local t = math.min((tick() - start) / duration, 1)
 		-- ease-out: быстрее в начале, мягче к концу
 		local easedT = math.sin(t * math.pi / 2)
 		local yaw = startCameraYaw + cameraDiff * easedT
+		local cf = cameraCFrameFromYaw(yaw)
+		if not cf then
+			return
+		end
 		pcall(function()
 			camera.CameraType = Enum.CameraType.Scriptable
-			camera.CFrame = cameraCFrameFromYaw(yaw)
+			camera.CFrame = cf
 		end)
 	end
 
@@ -885,11 +973,24 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera, turnSpeed)
 			return { success = false, error = "cancelled" }
 		end
 
+		hrp = ensureHrp()
+		if not hrp then
+			releaseCamera()
+			if humanoid and originalAutoRotate ~= nil then
+				pcall(function()
+					humanoid.AutoRotate = originalAutoRotate
+				end)
+			end
+			return { success = false, error = "HumanoidRootPart lost during turn" }
+		end
+
 		local t = math.min((tick() - start) / duration, 1)
 		local easedT = math.sin(t * math.pi / 2)
 		local newYaw = currentYaw + diff * easedT
 		local cf = CFrame.new(hrp.Position) * CFrame.Angles(0, newYaw, 0)
-		hrp.CFrame = cf
+		pcall(function()
+			hrp.CFrame = cf
+		end)
 
 		if t >= 1 then
 			break
@@ -897,7 +998,12 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera, turnSpeed)
 		task.wait(0.03)
 	end
 
-	hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, targetYaw, 0)
+	hrp = ensureHrp()
+	if hrp then
+		pcall(function()
+			hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, targetYaw, 0)
+		end)
+	end
 
 	if withCamera and camera then
 		-- Даём камере довернуться, даже если персонаж уже на целевом угле.
@@ -915,6 +1021,10 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera, turnSpeed)
 		end)
 	end
 
+	hrp = ensureHrp()
+	if not hrp then
+		return { success = false, error = "HumanoidRootPart lost after turn" }
+	end
 	local _, finalYaw = hrp.CFrame:ToEulerAnglesYXZ()
 	return {
 		success = true,
