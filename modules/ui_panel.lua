@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "1.7.0",
+    version = "1.7.1",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -157,8 +157,14 @@ end
 
 local function stopAgent()
     if currentAgent then
+        local eng = rawget(currentAgent, "engine")
         currentAgent:stop()
         currentAgent = nil
+        if eng and eng.releaseCamera then
+            pcall(function()
+                eng:releaseCamera()
+            end)
+        end
     end
     getgenv().SanDiegoAgentRunning = nil
 end

@@ -724,6 +724,8 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera, turnSpeed)
 		return { success = false, error = degrees }
 	end
 
+	self:releaseCamera()
+
 	turnSpeed = tonumber(turnSpeed) or 10
 	if type(turnSpeed) ~= "number" or turnSpeed % 1 ~= 0 or turnSpeed < 1 or turnSpeed > 10 then
 		return { success = false, error = "param 'speed' must be an integer in [1, 10]" }
@@ -943,6 +945,21 @@ function CommandEngine:_validateTiltCamera(payload)
 	return true, degrees
 end
 
+function CommandEngine:releaseCamera()
+	local RunService = game:GetService("RunService")
+	local binds = {
+		"SanDiegoTurnCamera",
+		"SanDiegoTurnCameraRelease",
+		"SanDiegoTiltCamera",
+		"SanDiegoTiltCameraHold",
+	}
+	for _, name in ipairs(binds) do
+		pcall(function()
+			RunService:UnbindFromRenderStep(name)
+		end)
+	end
+end
+
 function CommandEngine:_tiltCameraCommand(payload)
 	local ok, degrees = self:_validateTiltCamera(payload)
 	if not ok then
@@ -961,10 +978,11 @@ function CommandEngine:_tiltCameraCommand(payload)
 		return { success = false, error = "param 'speed' must be an integer in [1, 10]" }
 	end
 
+	self:releaseCamera()
+
 	local targetPitch = math.rad(degrees)
 	local currentPitch, cameraYaw, _ = camera.CFrame:ToEulerAnglesYXZ()
 	local diff = targetPitch - currentPitch
-	-- Берём кратчайшую разницу, чтобы не крутить через верх.
 	if diff > math.pi then
 		diff = diff - 2 * math.pi
 	elseif diff < -math.pi then
@@ -976,13 +994,6 @@ function CommandEngine:_tiltCameraCommand(payload)
 	local holdBind = "SanDiegoTiltCameraHold"
 	local RunService = game:GetService("RunService")
 	local cameraPriority = (Enum.RenderPriority and Enum.RenderPriority.Camera.Value + 1) or 201
-
-	pcall(function()
-		RunService:UnbindFromRenderStep(cameraBind)
-	end)
-	pcall(function()
-		RunService:UnbindFromRenderStep(holdBind)
-	end)
 
 	local duration = math.max(0.2, math.abs(diff) / math.rad(90)) * (10 / speed)
 	duration = math.clamp(duration, 0.2, 2)
@@ -1008,63 +1019,28 @@ function CommandEngine:_tiltCameraCommand(payload)
 
 	while tick() - start < duration do
 		if self:_isCancelled() then
-			pcall(function()
-				RunService:UnbindFromRenderStep(cameraBind)
-			end)
+			self:releaseCamera()
 			return { success = false, error = "cancelled" }
 		end
 		task.wait(0.03)
 	end
 
-	pcall(function()
-		RunService:UnbindFromRenderStep(cameraBind)
-	end)
+	self:releaseCamera()
 
 	if self:_isCancelled() then
 		return { success = false, error = "cancelled" }
 	end
 
-	-- Синхронизируем CameraModule, чтобы Custom-камера не сбросила угол сразу после разблокировки.
-	local player = Players.LocalPlayer
-	pcall(function()
-		local playerScripts = player:WaitForChild("PlayerScripts", 2)
-		if not playerScripts then
-			return
-		end
-		local cameraModule = playerScripts:WaitForChild("CameraModule", 2)
-		if not cameraModule then
-			return
-		end
-		local playerModule = require(cameraModule)
-		local cameraController = playerModule:GetCameras()
-		local activeController = cameraController and cameraController.activeCameraController
-		if activeController and typeof(activeController) == "table" then
-			activeController.azimuth = cameraYaw
-			activeController.elevation = targetPitch
-		end
-	end)
-
-	-- Удерживаем итоговый угол через RenderStep, чтобы камера "подхватила" его.
-	local holdStart = tick()
-	local holdDuration = 0.6
+	-- Бесконечный hold: удерживаем наклон, но позволяем меняться yaw (горизонтальный поворот).
 	RunService:BindToRenderStep(holdBind, cameraPriority, function()
 		if not camera then
-			pcall(function()
-				RunService:UnbindFromRenderStep(holdBind)
-			end)
 			return
 		end
+		local _, yaw, _ = camera.CFrame:ToEulerAnglesYXZ()
 		pcall(function()
-			camera.CFrame = cameraCFrameFromPitch(targetPitch)
+			camera.CFrame = CFrame.new(camera.CFrame.Position) * CFrame.fromEulerAnglesYXZ(targetPitch, yaw, 0)
 		end)
-		if tick() - holdStart >= holdDuration then
-			pcall(function()
-				RunService:UnbindFromRenderStep(holdBind)
-			end)
-		end
 	end)
-
-	task.wait(holdDuration + 0.1)
 
 	return {
 		success = true,
