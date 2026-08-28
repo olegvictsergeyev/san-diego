@@ -174,6 +174,13 @@ POST /commands/{id}/status
       }
     },
     {
+      "name": "tilt_camera",
+      "params": {
+        "degrees": { "type": "number", "min": -80, "max": 80 },
+        "speed": { "type": "number", "min": 1, "max": 10 }
+      }
+    },
+    {
       "name": "join_private_server",
       "params": {
         "code": { "type": "string", "min": 1, "max": 64 }

@@ -295,6 +295,26 @@ function CommandEngine:getCommandsSpec()
 			},
 		},
 		{
+			name = "tilt_camera",
+			description = "Наклонить камеру по вертикали (без поворота персонажа)",
+			params = {
+				degrees = {
+					type = "integer",
+					required = true,
+					min = -80,
+					max = 80,
+					description = "Вертикальный угол в градусах: положительные — вверх, отрицательные — вниз (0 — горизонт)",
+				},
+				speed = {
+					type = "integer",
+					required = false,
+					min = 1,
+					max = 10,
+					description = "Скорость наклона: 10 — быстро (по умолчанию), 1 — медленно",
+				},
+			},
+		},
+		{
 			name = "join_private_server",
 			description = "Перейти на приватный сервер по коду",
 			params = {
@@ -909,6 +929,99 @@ function CommandEngine:_turnWithCameraCommand(payload)
 	return self:_smoothTurn(degrees, true, speed)
 end
 
+function CommandEngine:_validateTiltCamera(payload)
+	local degrees = payload and payload.degrees
+	if typeof(degrees) ~= "number" then
+		return false, "param 'degrees' must be an integer"
+	end
+	if degrees % 1 ~= 0 then
+		return false, "param 'degrees' must be an integer"
+	end
+	if degrees < -80 or degrees > 80 then
+		return false, "param 'degrees' out of range [-80, 80]"
+	end
+	return true, degrees
+end
+
+function CommandEngine:_tiltCameraCommand(payload)
+	local ok, degrees = self:_validateTiltCamera(payload)
+	if not ok then
+		return { success = false, error = degrees }
+	end
+
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return { success = false, error = "Camera not found" }
+	end
+
+	local speed = payload and payload.speed
+	if speed == nil then
+		speed = 10
+	elseif typeof(speed) ~= "number" or speed % 1 ~= 0 or speed < 1 or speed > 10 then
+		return { success = false, error = "param 'speed' must be an integer in [1, 10]" }
+	end
+
+	local targetElevation = math.rad(degrees)
+	local lookY = math.clamp(camera.CFrame.LookVector.Y, -1, 1)
+	local currentElevation = math.asin(lookY)
+	local diff = targetElevation - currentElevation
+
+	local baseStep = math.rad(2)
+	local stepSize = baseStep * (speed / 10)
+	local steps = math.max(1, math.floor(math.abs(diff) / stepSize))
+
+	local player = Players.LocalPlayer
+	local activeController
+	pcall(function()
+		local playerScripts = player:WaitForChild("PlayerScripts", 2)
+		if not playerScripts then return end
+		local cameraModule = playerScripts:WaitForChild("CameraModule", 2)
+		if not cameraModule then return end
+		local playerModule = require(cameraModule)
+		local cameraController = playerModule:GetCameras()
+		activeController = cameraController and cameraController.activeCameraController
+	end)
+
+	for i = 1, steps do
+		if self:_isCancelled() then
+			return { success = false, error = "cancelled" }
+		end
+		local elevation = currentElevation + diff * (i / steps)
+		if activeController and typeof(activeController) == "table" then
+			pcall(function()
+				activeController.elevation = elevation
+			end)
+		end
+		local _, yaw, _ = camera.CFrame:ToEulerAnglesYXZ()
+		pcall(function()
+			camera.CFrame = CFrame.new(camera.CFrame.Position) * CFrame.Angles(elevation, yaw, 0)
+		end)
+		task.wait(0.02)
+	end
+
+	if self:_isCancelled() then
+		return { success = false, error = "cancelled" }
+	end
+
+	if activeController and typeof(activeController) == "table" then
+		pcall(function()
+			activeController.elevation = targetElevation
+		end)
+	end
+	local _, yaw, _ = camera.CFrame:ToEulerAnglesYXZ()
+	pcall(function()
+		camera.CFrame = CFrame.new(camera.CFrame.Position) * CFrame.Angles(targetElevation, yaw, 0)
+	end)
+
+	return {
+		success = true,
+		data = {
+			degrees = degrees,
+			elevation = math.round(math.deg(targetElevation) * 10) / 10,
+		},
+	}
+end
+
 function CommandEngine:_cancelCurrent()
 	self:requestCancel()
 	return { success = true, data = { cancelledCommandId = self.currentCommandId } }
@@ -987,6 +1100,8 @@ function CommandEngine:execute(command)
 		result = self:_turnCommand(payload)
 	elseif name == "turn_with_camera" then
 		result = self:_turnWithCameraCommand(payload)
+	elseif name == "tilt_camera" then
+		result = self:_tiltCameraCommand(payload)
 	elseif name == "join_private_server" then
 		result = self:_joinPrivateServer(payload)
 	elseif name == "cancel" then
