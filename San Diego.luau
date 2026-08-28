@@ -1,1 +1,0 @@
-loadstring(game:HttpGet("https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/final/agent.lua"))()
