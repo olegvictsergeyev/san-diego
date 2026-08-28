@@ -1115,6 +1115,36 @@ function CommandEngine:_setTeamCommand(payload)
 		return { success = false, error = "LocalPlayer not found" }
 	end
 
+	-- San Diego использует RemoteFunction JoinTeam для смены команды.
+	local joinTeamRemote
+	pcall(function()
+		local remotes = game:GetService("ReplicatedStorage"):FindFirstChild("__remotes")
+		if not remotes then return end
+		local teamService = remotes:FindFirstChild("TeamService")
+		if not teamService then return end
+		joinTeamRemote = teamService:FindFirstChild("JoinTeam")
+	end)
+
+	if joinTeamRemote and (joinTeamRemote:IsA("RemoteFunction") or joinTeamRemote:IsA("RemoteEvent")) then
+		local ok, result = pcall(function()
+			return joinTeamRemote:InvokeServer(teamName)
+		end)
+		if not ok then
+			return { success = false, error = "JoinTeam remote failed: " .. tostring(result) }
+		end
+		if typeof(result) == "table" and result.Success == false then
+			return { success = false, error = result.Message or "team change rejected by server" }
+		end
+		return {
+			success = true,
+			data = {
+				team = teamName,
+				remoteResult = result,
+			},
+		}
+	end
+
+	-- Fallback: прямое присвоение Player.Team.
 	local TeamsService = game:GetService("Teams")
 	local team
 	for _, t in ipairs(TeamsService:GetTeams()) do
