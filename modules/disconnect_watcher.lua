@@ -1,4 +1,3 @@
-local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 
 local DisconnectWatcher = {}
@@ -9,8 +8,6 @@ function DisconnectWatcher.new(agent, compat, opts)
 		agent = agent,
 		compat = compat,
 		opts = opts or {},
-		loaderUrl = opts and opts.loaderUrl,
-		serverState = opts and opts.serverState,
 		watching = false,
 		handled = false,
 	}, DisconnectWatcher)
@@ -64,142 +61,22 @@ function DisconnectWatcher:_readErrorInfo()
 	}
 end
 
-function DisconnectWatcher:_shouldReconnect(info)
-	if not info then
-		return false
-	end
-	local title = (info.title or ""):lower()
-	if title:find("disconnect") then
-		return true
-	end
-	if info.code == "277" or info.code == "278" then
-		return true
-	end
-	return false
-end
-
-function DisconnectWatcher:_getButton(name)
-	local prompt = self:_getErrorPrompt()
-	if not prompt then
-		return nil
-	end
-	local area = prompt:FindFirstChild("MessageArea")
-	if not area then
-		return nil
-	end
-	local frame = area:FindFirstChild("ErrorFrame")
-	if not frame then
-		return nil
-	end
-	local buttons = frame:FindFirstChild("ButtonArea")
-	if not buttons then
-		return nil
-	end
-	return buttons:FindFirstChild(name)
-end
-
-function DisconnectWatcher:_fireButton(btn)
-	if not btn then
-		self:_log("fireButton: button is nil")
-		return false
-	end
-	self:_log("firing button", btn.Name)
-	local signals = { "Activated", "MouseButton1Click", "MouseButton1Down" }
-	local fired = false
-
-	if typeof(firesignal) == "function" then
-		for _, signalName in ipairs(signals) do
-			local signal = btn[signalName]
-			if signal then
-				local ok = pcall(firesignal, signal)
-				if ok then
-					fired = true
-					self:_log("firesignal", signalName, "ok")
-				end
-			end
-		end
-	end
-
-	local getConn = self.compat and self.compat.getConnections or getconnections
-	if typeof(getConn) ~= "function" then
-		self:_log("getconnections not available")
-		return fired
-	end
-
-	for _, signalName in ipairs(signals) do
-		local signal = btn[signalName]
-		if signal then
-			local conns = getConn(signal)
-			self:_log("signal", signalName, "connections", tostring(#conns))
-			for _, conn in ipairs(conns) do
-				if typeof(conn.Function) == "function" then
-					local ok = pcall(conn.Function)
-					self:_log("fired connection", signalName, tostring(ok))
-					fired = true
-				end
-			end
-		end
-	end
-
-	return fired
-end
-
-function DisconnectWatcher:_queueReload()
-	if not self.loaderUrl then
-		return
-	end
-	local baseUrl = tostring(self.loaderUrl):match("(.+)/final/agent%.lua$") or self.loaderUrl
-	local code = 'local baseUrl = "' .. baseUrl .. '"\ngetgenv().SanDiegoAgentBaseUrl = baseUrl\nlocal ok, err = pcall(function()\n    loadstring(game:HttpGet(baseUrl .. "/final/agent.lua?nocache=" .. tostring(tick())))()\nend)\nif not ok then\n    warn("[SanDiegoAgent][DisconnectWatcher] reload failed: " .. tostring(err))\nend'
-	if self.compat and self.compat.queueOnTeleport then
-		self.compat.queueOnTeleport(code)
-	else
-		local q = queue_on_teleport
-		if typeof(q) == "function" then
-			pcall(q, code)
-		end
-	end
-end
-
-function DisconnectWatcher:_saveCurrentServer()
-	if not self.serverState then
-		return
-	end
-	local placeId = game.PlaceId
-	local jobId = game.JobId
-	local ok, err = pcall(function()
-		return self.serverState:save(placeId, jobId)
-	end)
-	self:_log("saved server", tostring(placeId), tostring(jobId), tostring(ok), tostring(err))
-end
-
 function DisconnectWatcher:_onPromptShown()
-	local info = self:_readErrorInfo()
-	if not info then
-		return
-	end
-	if self:_shouldReconnect(info) then
-		self:_saveCurrentServer()
-	end
-	if self.agent and self.agent.reportDisconnect then
-		pcall(function()
-			self.agent:reportDisconnect(info)
-		end)
-	end
 	if self.handled then
 		return
 	end
 	self.handled = true
 
-	if not self:_shouldReconnect(info) then
+	local info = self:_readErrorInfo()
+	if not info then
 		return
 	end
 
-	self:_queueReload()
+	self:_log("error/disconnect prompt shown", tostring(info.title), tostring(info.code))
 
-	if self.opts.autoReconnect then
-		task.spawn(function()
-			task.wait(0.5)
-			self:clickReconnect()
+	if self.agent and self.agent.reportError then
+		pcall(function()
+			self.agent:reportError(info)
 		end)
 	end
 end
@@ -240,32 +117,6 @@ function DisconnectWatcher:start()
 	self:_log("starting")
 	self:_watchExisting()
 	self:_watchPromptAdded()
-end
-
-function DisconnectWatcher:clickReconnect()
-	local btn = self:_getButton("ReconnectButton")
-	if btn then
-		self:_log("ReconnectButton found, class", btn.ClassName)
-	else
-		self:_log("ReconnectButton not found")
-	end
-	return self:_fireButton(btn)
-end
-
-function DisconnectWatcher:clickLeave()
-	local btn = self:_getButton("LeaveButton")
-	return self:_fireButton(btn)
-end
-
-function DisconnectWatcher:hidePrompt()
-	local prompt = self:_getErrorPrompt()
-	if prompt then
-		prompt.Visible = false
-	end
-end
-
-function DisconnectWatcher:reconnect()
-	return self:clickReconnect()
 end
 
 return DisconnectWatcher

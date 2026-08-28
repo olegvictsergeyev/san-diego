@@ -8,7 +8,6 @@ function PrivateServer.new(opts)
 	local self = setmetatable({}, PrivateServer)
 	self.loaderUrl = opts and opts.loaderUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/final/agent.lua"
 	self.compat = opts and opts.compat or nil
-	self.serverState = opts and opts.serverState or nil
 	return self
 end
 
@@ -81,11 +80,6 @@ function PrivateServer:joinByCode(code)
 	-- Запускаем в отдельном потоке, потому что успешный телепорт
 	-- может прервать выполнение текущего скрипта.
 	task.spawn(function()
-		if self.serverState then
-			pcall(function()
-				self.serverState:savePrivateCode(code)
-			end)
-		end
 		self:_queueReload()
 		pcall(function()
 			joinRemote:InvokeServer(code)
@@ -97,32 +91,6 @@ function PrivateServer:joinByCode(code)
 		data = {
 			code = code,
 			action = "teleport_requested",
-		},
-	}
-end
-
-function PrivateServer:reconnectByCode(code)
-	if typeof(code) ~= "string" or code:gsub("%s+", "") == "" then
-		return { success = false, error = "private server code must be a non-empty string" }
-	end
-
-	local joinRemote, joinErr = self:_getRemote("JoinServerByCode")
-	if not joinRemote then
-		return { success = false, error = joinErr }
-	end
-
-	task.spawn(function()
-		self:_queueReload()
-		pcall(function()
-			joinRemote:InvokeServer(code)
-		end)
-	end)
-
-	return {
-		success = true,
-		data = {
-			code = code,
-			action = "reconnect_requested",
 		},
 	}
 end

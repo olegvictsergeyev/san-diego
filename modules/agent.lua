@@ -73,19 +73,19 @@ function Agent:_sendStatus(force)
 	end
 end
 
-function Agent:reportDisconnect(info)
+function Agent:reportError(info)
 	if not info then
 		return
 	end
-	self:_log("WARN", "disconnect detected:", tostring(info.title), tostring(info.code))
+	self:_log("WARN", "error/disconnect detected:", tostring(info.title), tostring(info.code))
 	if self.state and self.state.setStatusOverride then
-		self.state:setStatusOverride("error")
+		self.state:setStatusOverride("offline")
 	end
 	self.config.customData.disconnect = info
 	self:_sendStatus()
 end
 
-function Agent:clearDisconnect()
+function Agent:clearError()
 	if self.state and self.state.setStatusOverride then
 		self.state:setStatusOverride(nil)
 	end
@@ -303,6 +303,9 @@ function Agent:start()
 	self:_log("INFO", "starting agent for game", self.config.gameSlug)
 
 	self:_sendStatus()
+
+	-- Сбрасываем возможный disconnect из прошлой сессии.
+	self:clearError()
 
 	task.spawn(function()
 		self:_statusLoop()

@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "1.6.2",
+    version = "1.7.0",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -47,7 +47,6 @@ local CONFIG = {
             disconnect_watcher = base .. "/modules/disconnect_watcher.lua",
             ui_toggle = base .. "/modules/ui_toggle.lua",
             autoexec = base .. "/modules/autoexec.lua",
-            server_state = base .. "/modules/server_state.lua",
             afk = base .. "/modules/afk.lua",
         }
     end)(),
@@ -60,9 +59,6 @@ local CONFIG = {
 
     -- true — показать панель Orion; false — запустить агента сразу
     showUI = true,
-
-    -- true — автоматически нажимать Reconnect при ошибке 277
-    autoReconnectOnDisconnect = true,
 
     -- AFK-режим: периодическое незаметное действие, чтобы не выкидывало из игры
     afkEnabled = true,
@@ -96,17 +92,13 @@ local Compat = loadModule("compat")
 local DisconnectWatcher = loadModule("disconnect_watcher")
 local ToggleUI = loadModule("ui_toggle")
 local Autoexec = loadModule("autoexec")
-local ServerState = loadModule("server_state")
 local CommandEngine = loadModule("command_engine")
 local Agent = loadModule("agent")
 local Afk = loadModule("afk")
 
-local serverState = ServerState.new(Compat, Players.LocalPlayer and Players.LocalPlayer.Name)
-
 local privateServer = PrivateServer.new({
     loaderUrl = CONFIG.agentLoaderUrl,
     compat = Compat,
-    serverState = serverState,
 })
 
 local currentAgent = nil
@@ -119,71 +111,9 @@ local coreStarted = false
 local runCore
 
 local function ensureCorrectServer()
-	local saved = serverState:load()
-	if not saved then
-		return true
-	end
-
-	-- Телепорт/reconnect делаем только если был зафиксирован дисконнект.
-	if not saved.reconnectPending then
-		serverState:clear()
-		return true
-	end
-
-	local currentJobId = tostring(game.JobId)
-
-	-- Уже на нужном сервере — сбрасываем сохранение.
-	if saved.jobId and saved.jobId == currentJobId then
-		serverState:clear()
-		return true
-	end
-
-	-- Игнорируем устаревшее сохранение (старше 3 минут).
-	local savedAt = tonumber(saved.savedAt) or 0
-	if tick() - savedAt > 180 then
-		serverState:clear()
-		return true
-	end
-
-	-- Только что зашли по коду — сохраняем текущий JobId.
-	if saved.code and not saved.jobId then
-		serverState:save(game.PlaceId, currentJobId)
-		return true
-	end
-
-	-- Переподключаемся по коду, если он есть.
-	if saved.code then
-		warn("[SanDiegoAgent][ServerGuard] current server does not match saved " .. currentJobId .. ", reconnecting by private server code")
-		local ok, err = pcall(function()
-			privateServer:reconnectByCode(saved.code)
-		end)
-		if ok then
-			return false
-		end
-		warn("[SanDiegoAgent][ServerGuard] reconnect by code failed: " .. tostring(err))
-	end
-
-	-- Fallback: телепорт по placeId/jobId.
-	local placeId = tonumber(saved.placeId) or game.PlaceId
-	local jobId = tostring(saved.jobId)
-	warn("[SanDiegoAgent][ServerGuard] current server does not match saved " .. currentJobId .. ", teleporting to " .. jobId)
-
-	local loaderCode = 'getgenv().SanDiegoAgentBaseUrl = "' .. (getgenv().SanDiegoAgentBaseUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main") .. '"\nloadstring(game:HttpGet("' .. CONFIG.agentLoaderUrl .. '?nocache=" .. tostring(tick())))()'
-	Compat.queueOnTeleport(loaderCode)
-
-	local TeleportService = game:GetService("TeleportService")
-	local player = Players.LocalPlayer
-	local ok, err = pcall(function()
-		TeleportService:TeleportToPlaceInstance(placeId, jobId, player)
-	end)
-	if not ok then
-		warn("[SanDiegoAgent][ServerGuard] teleport failed: " .. tostring(err))
-		serverState:clear()
-		hideTeleportErrorPrompt()
-		return true
-	end
-
-	return false
+	-- Агент больше не переподключается самостоятельно.
+	-- Переходы между серверами управляются бэкендом через команды.
+	return true
 end
 
 local function makeAgent()
@@ -199,9 +129,7 @@ local function startWatcher()
         return
     end
     local watcher = DisconnectWatcher.new(currentAgent, Compat, {
-        autoReconnect = CONFIG.autoReconnectOnDisconnect,
         loaderUrl = CONFIG.agentLoaderUrl,
-        serverState = serverState,
     })
     watcher:start()
 end
@@ -427,27 +355,6 @@ local function buildUI()
     end)
 end
 
-local function hideTeleportErrorPrompt()
-	local ok, coreGui = pcall(function()
-		return game:GetService("CoreGui")
-	end)
-	if not ok then
-		return
-	end
-	local promptGui = coreGui:FindFirstChild("RobloxPromptGui")
-	if not promptGui then
-		return
-	end
-	local overlay = promptGui:FindFirstChild("promptOverlay")
-	if not overlay then
-		return
-	end
-	local prompt = overlay:FindFirstChild("ErrorPrompt")
-	if prompt and typeof(prompt) == "Instance" then
-		prompt.Visible = false
-	end
-end
-
 local function runCore()
 	if coreStarted then
 		return
@@ -477,38 +384,7 @@ local UIPanel = {}
 function UIPanel.run()
 	getgenv().StopSanDiegoAgent = false
 
-	if not ensureCorrectServer() then
-		print("[SanDiegoAgent][ServerGuard] waiting for teleport to previous server, agent not started")
-
-		local TeleportService = game:GetService("TeleportService")
-		local conn
-		conn = TeleportService.TeleportInitFailed:Connect(function(player, result, msg)
-			if player == Players.LocalPlayer then
-				warn("[SanDiegoAgent][ServerGuard] teleport failed:", tostring(result), tostring(msg))
-				serverState:clear()
-				hideTeleportErrorPrompt()
-				runCore()
-				if conn then
-					conn:Disconnect()
-				end
-			end
-		end)
-
-		task.delay(10, function()
-			if conn then
-				conn:Disconnect()
-			end
-			if not coreStarted then
-				warn("[SanDiegoAgent][ServerGuard] teleport timeout, starting agent on current server")
-				serverState:clear()
-				hideTeleportErrorPrompt()
-				runCore()
-			end
-		end)
-
-		return
-	end
-
+	ensureCorrectServer()
 	runCore()
 end
 
