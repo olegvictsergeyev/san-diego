@@ -8,11 +8,13 @@
         getgenv().StopSanDiegoAgent = true
 ]]
 
-if getgenv().SanDiegoAgentRunning then
-    warn("[SanDiegoAgent] already running, skipping duplicate start")
+local currentJobId = tostring(game.JobId or "")
+if getgenv().SanDiegoAgentRunning and getgenv().SanDiegoAgentRunningJobId == currentJobId then
+    warn("[SanDiegoAgent] already running on this server, skipping duplicate start")
     return
 end
 getgenv().SanDiegoAgentRunning = true
+getgenv().SanDiegoAgentRunningJobId = currentJobId
 
 local BASE_URL = getgenv().SanDiegoAgentBaseUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main"
 local UI_PANEL_URL = BASE_URL .. "/modules/ui_panel.lua?nocache=" .. tostring(tick())
@@ -38,4 +40,5 @@ end)
 if not ok then
     warn("[SanDiegoAgent] failed to start: " .. tostring(result))
     getgenv().SanDiegoAgentRunning = nil
+    getgenv().SanDiegoAgentRunningJobId = nil
 end

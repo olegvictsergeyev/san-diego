@@ -13,7 +13,7 @@ end
 
 function PrivateServer:_queueReload()
 	local baseUrl = tostring(self.loaderUrl):match("(.+)/final/agent%.lua$") or self.loaderUrl
-	local code = 'local baseUrl = "' .. baseUrl .. '"\ngetgenv().SanDiegoAgentBaseUrl = baseUrl\ntask.wait(0.5)\nprint("[SanDiegoAgent][QueueOnTeleport] reloading loader after teleport")\nlocal ok, err = pcall(function()\n    loadstring(game:HttpGet(baseUrl .. "/final/agent.lua?nocache=" .. tostring(tick())))()\nend)\nif not ok then\n    warn("[SanDiegoAgent][QueueOnTeleport] reload failed: " .. tostring(err))\nend'
+	local code = 'local baseUrl = "' .. baseUrl .. '"\ngetgenv().SanDiegoAgentBaseUrl = baseUrl\ngetgenv().SanDiegoAgentRunning = nil\ngetgenv().SanDiegoAgentRunningJobId = nil\ntask.wait(0.5)\nprint("[SanDiegoAgent][QueueOnTeleport] reloading loader after teleport")\nlocal ok, err = pcall(function()\n    loadstring(game:HttpGet(baseUrl .. "/final/agent.lua?nocache=" .. tostring(tick())))()\nend)\nif not ok then\n    warn("[SanDiegoAgent][QueueOnTeleport] reload failed: " .. tostring(err))\nend'
 	if self.compat and self.compat.queueOnTeleport then
 		return self.compat.queueOnTeleport(code)
 	end
