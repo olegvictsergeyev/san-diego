@@ -961,78 +961,116 @@ function CommandEngine:_tiltCameraCommand(payload)
 		return { success = false, error = "param 'speed' must be an integer in [1, 10]" }
 	end
 
-	local targetElevation = math.rad(degrees)
-	local lookY = math.clamp(camera.CFrame.LookVector.Y, -1, 1)
-	local currentElevation = math.asin(lookY)
-	local diff = targetElevation - currentElevation
-
-	local baseStep = math.rad(2)
-	local stepSize = baseStep * (speed / 10)
-	local steps = math.max(1, math.floor(math.abs(diff) / stepSize))
+	local targetPitch = math.rad(degrees)
+	local currentPitch, cameraYaw, _ = camera.CFrame:ToEulerAnglesYXZ()
+	local diff = targetPitch - currentPitch
+	-- Берём кратчайшую разницу, чтобы не крутить через верх.
+	if diff > math.pi then
+		diff = diff - 2 * math.pi
+	elseif diff < -math.pi then
+		diff = diff + 2 * math.pi
+	end
 
 	local cameraPos = camera.CFrame.Position
-	local _, cameraYaw, _ = camera.CFrame:ToEulerAnglesYXZ()
+	local cameraBind = "SanDiegoTiltCamera"
+	local holdBind = "SanDiegoTiltCameraHold"
+	local RunService = game:GetService("RunService")
+	local cameraPriority = (Enum.RenderPriority and Enum.RenderPriority.Camera.Value + 1) or 201
 
-	local originalCameraType
 	pcall(function()
-		originalCameraType = camera.CameraType
-		camera.CameraType = Enum.CameraType.Scriptable
+		RunService:UnbindFromRenderStep(cameraBind)
+	end)
+	pcall(function()
+		RunService:UnbindFromRenderStep(holdBind)
 	end)
 
-	local function restoreCameraType()
+	local duration = math.max(0.2, math.abs(diff) / math.rad(90)) * (10 / speed)
+	duration = math.clamp(duration, 0.2, 2)
+	local start = tick()
+
+	local function cameraCFrameFromPitch(pitch)
+		return CFrame.new(cameraPos) * CFrame.fromEulerAnglesYXZ(pitch, cameraYaw, 0)
+	end
+
+	local function alignCamera()
+		if not camera then
+			return
+		end
+		local t = math.min((tick() - start) / duration, 1)
+		local easedT = math.sin(t * math.pi / 2)
+		local pitch = currentPitch + diff * easedT
 		pcall(function()
-			if originalCameraType then
-				camera.CameraType = originalCameraType
-			else
-				camera.CameraType = Enum.CameraType.Custom
-			end
+			camera.CFrame = cameraCFrameFromPitch(pitch)
 		end)
 	end
 
-	for i = 1, steps do
+	RunService:BindToRenderStep(cameraBind, cameraPriority, alignCamera)
+
+	while tick() - start < duration do
 		if self:_isCancelled() then
-			restoreCameraType()
+			pcall(function()
+				RunService:UnbindFromRenderStep(cameraBind)
+			end)
 			return { success = false, error = "cancelled" }
 		end
-		local elevation = currentElevation + diff * (i / steps)
-		pcall(function()
-			camera.CFrame = CFrame.new(cameraPos) * CFrame.Angles(elevation, cameraYaw, 0)
-		end)
-		task.wait(0.02)
+		task.wait(0.03)
 	end
 
+	pcall(function()
+		RunService:UnbindFromRenderStep(cameraBind)
+	end)
+
 	if self:_isCancelled() then
-		restoreCameraType()
 		return { success = false, error = "cancelled" }
 	end
 
-	pcall(function()
-		camera.CFrame = CFrame.new(cameraPos) * CFrame.Angles(targetElevation, cameraYaw, 0)
-	end)
-
-	-- Синхронизируем CameraModule, чтобы Custom-камера не сбросила угол сразу после возврата.
+	-- Синхронизируем CameraModule, чтобы Custom-камера не сбросила угол сразу после разблокировки.
 	local player = Players.LocalPlayer
 	pcall(function()
 		local playerScripts = player:WaitForChild("PlayerScripts", 2)
-		if not playerScripts then return end
+		if not playerScripts then
+			return
+		end
 		local cameraModule = playerScripts:WaitForChild("CameraModule", 2)
-		if not cameraModule then return end
+		if not cameraModule then
+			return
+		end
 		local playerModule = require(cameraModule)
 		local cameraController = playerModule:GetCameras()
 		local activeController = cameraController and cameraController.activeCameraController
 		if activeController and typeof(activeController) == "table" then
 			activeController.azimuth = cameraYaw
-			activeController.elevation = targetElevation
+			activeController.elevation = targetPitch
 		end
 	end)
 
-	restoreCameraType()
+	-- Удерживаем итоговый угол через RenderStep, чтобы камера "подхватила" его.
+	local holdStart = tick()
+	local holdDuration = 0.6
+	RunService:BindToRenderStep(holdBind, cameraPriority, function()
+		if not camera then
+			pcall(function()
+				RunService:UnbindFromRenderStep(holdBind)
+			end)
+			return
+		end
+		pcall(function()
+			camera.CFrame = cameraCFrameFromPitch(targetPitch)
+		end)
+		if tick() - holdStart >= holdDuration then
+			pcall(function()
+				RunService:UnbindFromRenderStep(holdBind)
+			end)
+		end
+	end)
+
+	task.wait(holdDuration + 0.1)
 
 	return {
 		success = true,
 		data = {
 			degrees = degrees,
-			elevation = math.round(math.deg(targetElevation) * 10) / 10,
+			pitch = math.round(math.deg(targetPitch) * 10) / 10,
 		},
 	}
 end
