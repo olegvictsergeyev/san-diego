@@ -970,8 +970,48 @@ function CommandEngine:_tiltCameraCommand(payload)
 	local stepSize = baseStep * (speed / 10)
 	local steps = math.max(1, math.floor(math.abs(diff) / stepSize))
 
+	local cameraPos = camera.CFrame.Position
+	local _, cameraYaw, _ = camera.CFrame:ToEulerAnglesYXZ()
+
+	local originalCameraType
+	pcall(function()
+		originalCameraType = camera.CameraType
+		camera.CameraType = Enum.CameraType.Scriptable
+	end)
+
+	local function restoreCameraType()
+		pcall(function()
+			if originalCameraType then
+				camera.CameraType = originalCameraType
+			else
+				camera.CameraType = Enum.CameraType.Custom
+			end
+		end)
+	end
+
+	for i = 1, steps do
+		if self:_isCancelled() then
+			restoreCameraType()
+			return { success = false, error = "cancelled" }
+		end
+		local elevation = currentElevation + diff * (i / steps)
+		pcall(function()
+			camera.CFrame = CFrame.new(cameraPos) * CFrame.Angles(elevation, cameraYaw, 0)
+		end)
+		task.wait(0.02)
+	end
+
+	if self:_isCancelled() then
+		restoreCameraType()
+		return { success = false, error = "cancelled" }
+	end
+
+	pcall(function()
+		camera.CFrame = CFrame.new(cameraPos) * CFrame.Angles(targetElevation, cameraYaw, 0)
+	end)
+
+	-- Синхронизируем CameraModule, чтобы Custom-камера не сбросила угол сразу после возврата.
 	local player = Players.LocalPlayer
-	local activeController
 	pcall(function()
 		local playerScripts = player:WaitForChild("PlayerScripts", 2)
 		if not playerScripts then return end
@@ -979,39 +1019,14 @@ function CommandEngine:_tiltCameraCommand(payload)
 		if not cameraModule then return end
 		local playerModule = require(cameraModule)
 		local cameraController = playerModule:GetCameras()
-		activeController = cameraController and cameraController.activeCameraController
-	end)
-
-	for i = 1, steps do
-		if self:_isCancelled() then
-			return { success = false, error = "cancelled" }
-		end
-		local elevation = currentElevation + diff * (i / steps)
+		local activeController = cameraController and cameraController.activeCameraController
 		if activeController and typeof(activeController) == "table" then
-			pcall(function()
-				activeController.elevation = elevation
-			end)
-		end
-		local _, yaw, _ = camera.CFrame:ToEulerAnglesYXZ()
-		pcall(function()
-			camera.CFrame = CFrame.new(camera.CFrame.Position) * CFrame.Angles(elevation, yaw, 0)
-		end)
-		task.wait(0.02)
-	end
-
-	if self:_isCancelled() then
-		return { success = false, error = "cancelled" }
-	end
-
-	if activeController and typeof(activeController) == "table" then
-		pcall(function()
+			activeController.azimuth = cameraYaw
 			activeController.elevation = targetElevation
-		end)
-	end
-	local _, yaw, _ = camera.CFrame:ToEulerAnglesYXZ()
-	pcall(function()
-		camera.CFrame = CFrame.new(camera.CFrame.Position) * CFrame.Angles(targetElevation, yaw, 0)
+		end
 	end)
+
+	restoreCameraType()
 
 	return {
 		success = true,
