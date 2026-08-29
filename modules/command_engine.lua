@@ -393,7 +393,7 @@ function CommandEngine:getCommandsSpec()
 			},
 		},
 		{
-			name = "get_time",
+			name = "get_custom_field",
 			description = "Получить, сколько секунд прошло с момента установки указанного таймера",
 			params = {
 				name = {
@@ -1365,7 +1365,7 @@ function CommandEngine:_setTimeCommand(payload)
 	}
 end
 
-function CommandEngine:_getTimeCommand(payload)
+function CommandEngine:_getCustomFieldCommand(payload)
 	local ok, name = self:_validateTimerName(payload)
 	if not ok then
 		return { success = false, error = name }
@@ -1503,8 +1503,8 @@ function CommandEngine:execute(command)
 		result = self:_setActionCommand(payload)
 	elseif name == "set_time" then
 		result = self:_setTimeCommand(payload)
-	elseif name == "get_time" then
-		result = self:_getTimeCommand(payload)
+	elseif name == "get_custom_field" then
+		result = self:_getCustomFieldCommand(payload)
 	elseif name == "set_team" then
 		result = self:_setTeamCommand(payload)
 	else

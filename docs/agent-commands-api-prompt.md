@@ -208,7 +208,7 @@ POST /commands/{id}/status
       }
     },
     {
-      "name": "get_time",
+      "name": "get_custom_field",
       "params": {
         "name": { "type": "string", "min": 1, "max": 6 }
       }
