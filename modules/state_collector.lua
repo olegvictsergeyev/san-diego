@@ -253,8 +253,10 @@ function StateCollector:getTimerElapsed(name)
 end
 
 function StateCollector:resetTimers()
+	local now = os.time()
 	self._timers = {
-		time_1 = os.time(),
+		time_1 = now,
+		time_2 = now,
 	}
 end
 
