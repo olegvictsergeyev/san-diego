@@ -250,9 +250,11 @@ function StateCollector:getAll(custom)
 
 	if self._commandName then
 		customData.current_command = self._commandName
-	end
-	if self._commandStartedAt then
-		customData.command_started_at = self:_formatMskTime(self._commandStartedAt)
+		if self._commandStartedAt then
+			customData.command_started_at = self:_formatMskTime(self._commandStartedAt)
+		end
+	else
+		customData.current_command = ""
 	end
 
 	if typeof(custom) == "table" then

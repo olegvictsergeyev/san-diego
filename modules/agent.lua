@@ -197,6 +197,7 @@ function Agent:_handleCommand(command)
 	self.currentCommand = command
 	local startedAt = os.time()
 	self.state:setCommandState("in_progress", command.name, startedAt)
+	self:_sendStatus(true)
 
 	local ok, result = pcall(function()
 		return self.engine:execute(command)
@@ -226,6 +227,7 @@ function Agent:_handleCommand(command)
 	end
 
 	self.currentCommand = nil
+	self:_sendStatus(true)
 	self:_log("INFO", "command finished", command.id, command.name, status)
 end
 
