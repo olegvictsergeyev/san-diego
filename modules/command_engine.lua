@@ -3,11 +3,12 @@ local Players = game:GetService("Players")
 local CommandEngine = {}
 CommandEngine.__index = CommandEngine
 
-function CommandEngine.new(privateServer, afk)
+function CommandEngine.new(privateServer, afk, state)
 	local self = setmetatable({}, CommandEngine)
 	self.cancelled = false
 	self.currentCommandId = nil
 	self.afk = afk
+	self.state = state
 	if privateServer then
 		self.privateServer = privateServer
 	else
@@ -23,6 +24,10 @@ end
 
 function CommandEngine:setAfk(afk)
 	self.afk = afk
+end
+
+function CommandEngine:setState(state)
+	self.state = state
 end
 
 function CommandEngine:isBusy()
@@ -271,6 +276,26 @@ function CommandEngine:getCommandsSpec()
 					min = 60,
 					max = 3600,
 					description = "Интервал незаметного действия в секундах (по умолчанию 600)",
+				},
+			},
+		},
+		{
+			name = "set_action",
+			description = "Установить произвольный статус действия (action) без выполнения",
+			params = {
+				action = {
+					type = "string",
+					required = true,
+					min = 0,
+					max = 32,
+					description = "Значение action, например 'farm'. Пустая строка — сбросить.",
+				},
+				except = {
+					type = "string",
+					required = false,
+					min = 0,
+					max = 256,
+					description = "Список команд через запятую, которые не сбрасывают action (например 'respawn, jump')",
 				},
 			},
 		},
@@ -1214,6 +1239,37 @@ function CommandEngine:_afkCommand(payload)
 	}
 end
 
+function CommandEngine:_setActionCommand(payload)
+	local action = payload and payload.action
+	if action == nil then
+		return { success = false, error = "param 'action' is required" }
+	end
+	if typeof(action) ~= "string" then
+		return { success = false, error = "param 'action' must be a string" }
+	end
+	if #action > 32 then
+		return { success = false, error = "param 'action' too long (max 32)" }
+	end
+
+	local except = payload and payload.except
+	if except ~= nil and typeof(except) ~= "string" then
+		return { success = false, error = "param 'except' must be a string" }
+	end
+
+	if self.state and self.state.setAction then
+		self.state:setAction(action)
+		self.state:setActionExcept(except or "")
+	end
+
+	return {
+		success = true,
+		data = {
+			action = action,
+			except = except or "",
+		},
+	}
+end
+
 function CommandEngine:_setTeamCommand(payload)
 	local teamName = payload and payload.team
 	if typeof(teamName) ~= "string" or #teamName == 0 or #teamName > 32 then
@@ -1329,6 +1385,8 @@ function CommandEngine:execute(command)
 		result = self:_cancelCurrent()
 	elseif name == "afk" then
 		result = self:_afkCommand(payload)
+	elseif name == "set_action" then
+		result = self:_setActionCommand(payload)
 	elseif name == "set_team" then
 		result = self:_setTeamCommand(payload)
 	else

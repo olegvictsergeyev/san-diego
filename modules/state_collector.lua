@@ -33,6 +33,8 @@ function StateCollector.new(balancePath, version)
 	self.balancePath = balancePath or ""
 	self.version = version or "0.0.0"
 	self._cachedBalancePath = nil
+	self._action = ""
+	self._actionExcept = {}
 	return self
 end
 
@@ -204,6 +206,37 @@ function StateCollector:setCommandState(status, commandName, startedAt)
 	self._commandStartedAt = startedAt
 end
 
+function StateCollector:setAction(value)
+	self._action = tostring(value or "")
+end
+
+function StateCollector:clearAction()
+	self._action = ""
+end
+
+function StateCollector:setActionExcept(commaList)
+	self._actionExcept = {}
+	if typeof(commaList) ~= "string" then
+		return
+	end
+	for part in commaList:gmatch("[^,]+") do
+		local name = part:gsub("%s+", "")
+		if name ~= "" then
+			self._actionExcept[name] = true
+		end
+	end
+end
+
+function StateCollector:shouldResetAction(commandName)
+	if commandName == "set_action" then
+		return false
+	end
+	if self._actionExcept and self._actionExcept[commandName] then
+		return false
+	end
+	return true
+end
+
 function StateCollector:_formatMskTime(timestamp)
 	if not timestamp then return nil end
 	local t = os.date("!*t", timestamp + 3 * 3600)
@@ -246,6 +279,7 @@ function StateCollector:getAll(custom)
 		position_z = pos and math.round(pos.Z * 10) / 10 or 0,
 		team = self:getTeam(),
 		balance = self:getBalance(),
+		action = self._action or "",
 	}
 
 	if self._commandName then

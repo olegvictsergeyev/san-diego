@@ -81,6 +81,9 @@ function Agent:reportError(info)
 	if self.state and self.state.setStatusOverride then
 		self.state:setStatusOverride("offline")
 	end
+	if self.state and self.state.clearAction then
+		self.state:clearAction()
+	end
 	self.config.customData.disconnect = info
 	self:_sendStatus()
 end
@@ -88,6 +91,9 @@ end
 function Agent:clearError()
 	if self.state and self.state.setStatusOverride then
 		self.state:setStatusOverride(nil)
+	end
+	if self.state and self.state.clearAction then
+		self.state:clearAction()
 	end
 	self.config.customData.disconnect = nil
 	self:_sendStatus()
@@ -198,6 +204,10 @@ function Agent:_handleCommand(command)
 	local startedAt = os.time()
 	self.state:setCommandState("in_progress", command.name, startedAt)
 	self:_sendStatus(true)
+
+	if self.state and self.state.shouldResetAction and self.state:shouldResetAction(command.name) then
+		self.state:clearAction()
+	end
 
 	local ok, result = pcall(function()
 		return self.engine:execute(command)

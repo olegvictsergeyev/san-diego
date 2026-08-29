@@ -194,6 +194,13 @@ POST /commands/{id}/status
       }
     },
     {
+      "name": "set_action",
+      "params": {
+        "action": { "type": "string", "min": 0, "max": 32 },
+        "except": { "type": "string", "min": 0, "max": 256 }
+      }
+    },
+    {
       "name": "set_team",
       "params": {
         "team": { "type": "string", "min": 1, "max": 32 }
