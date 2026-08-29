@@ -373,6 +373,39 @@ function CommandEngine:getCommandsSpec()
 			},
 		},
 		{
+			name = "set_time",
+			description = "Установить один из таймеров time_1..time_5 в текущее время или указанный timestamp",
+			params = {
+				name = {
+					type = "string",
+					required = true,
+					min = 1,
+					max = 6,
+					description = "Имя таймера: time_1, time_2, time_3, time_4 или time_5",
+				},
+				value = {
+					type = "integer",
+					required = false,
+					min = 0,
+					max = 9999999999,
+					description = "Unix timestamp (опционально). Если не передан — используется текущее время.",
+				},
+			},
+		},
+		{
+			name = "get_time",
+			description = "Получить, сколько секунд прошло с момента установки указанного таймера",
+			params = {
+				name = {
+					type = "string",
+					required = true,
+					min = 1,
+					max = 6,
+					description = "Имя таймера: time_1, time_2, time_3, time_4 или time_5",
+				},
+			},
+		},
+		{
 			name = "join_private_server",
 			description = "Перейти на приватный сервер по коду",
 			params = {
@@ -733,6 +766,27 @@ function CommandEngine:_respawn()
 		return { success = false, error = "cancelled" }
 	end
 	humanoid.Health = 0
+
+	-- После возрождения сбрасываем time_2.
+	local player = self:_getPlayer()
+	if player and self.state and self.state.setTimer then
+		local state = self.state
+		local connection
+		connection = player.CharacterAdded:Connect(function()
+			state:setTimer("time_2")
+			if connection then
+				connection:Disconnect()
+				connection = nil
+			end
+		end)
+		task.delay(10, function()
+			if connection then
+				connection:Disconnect()
+				connection = nil
+			end
+		end)
+	end
+
 	return { success = true, data = { respawned = true } }
 end
 
@@ -1270,6 +1324,66 @@ function CommandEngine:_setActionCommand(payload)
 	}
 end
 
+function CommandEngine:_validateTimerName(payload)
+	local name = payload and payload.name
+	if typeof(name) ~= "string" then
+		return false, "param 'name' must be a string"
+	end
+	if name ~= "time_1" and name ~= "time_2" and name ~= "time_3" and name ~= "time_4" and name ~= "time_5" then
+		return false, "param 'name' must be one of: time_1, time_2, time_3, time_4, time_5"
+	end
+	return true, name
+end
+
+function CommandEngine:_setTimeCommand(payload)
+	local ok, name = self:_validateTimerName(payload)
+	if not ok then
+		return { success = false, error = name }
+	end
+
+	local value = payload and payload.value
+	if value ~= nil then
+		if typeof(value) ~= "number" or value % 1 ~= 0 then
+			return { success = false, error = "param 'value' must be an integer timestamp" }
+		end
+		if value < 0 or value > 9999999999 then
+			return { success = false, error = "param 'value' out of range [0, 9999999999]" }
+		end
+	end
+
+	if not (self.state and self.state.setTimer) then
+		return { success = false, error = "state not available" }
+	end
+
+	self.state:setTimer(name, value)
+	return {
+		success = true,
+		data = {
+			name = name,
+			elapsed = self.state:getTimerElapsed(name),
+		},
+	}
+end
+
+function CommandEngine:_getTimeCommand(payload)
+	local ok, name = self:_validateTimerName(payload)
+	if not ok then
+		return { success = false, error = name }
+	end
+
+	if not (self.state and self.state.getTimerElapsed) then
+		return { success = false, error = "state not available" }
+	end
+
+	return {
+		success = true,
+		data = {
+			name = name,
+			elapsed = self.state:getTimerElapsed(name),
+		},
+	}
+end
+
 function CommandEngine:_setTeamCommand(payload)
 	local teamName = payload and payload.team
 	if typeof(teamName) ~= "string" or #teamName == 0 or #teamName > 32 then
@@ -1387,6 +1501,10 @@ function CommandEngine:execute(command)
 		result = self:_afkCommand(payload)
 	elseif name == "set_action" then
 		result = self:_setActionCommand(payload)
+	elseif name == "set_time" then
+		result = self:_setTimeCommand(payload)
+	elseif name == "get_time" then
+		result = self:_getTimeCommand(payload)
 	elseif name == "set_team" then
 		result = self:_setTeamCommand(payload)
 	else

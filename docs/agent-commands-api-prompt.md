@@ -201,9 +201,16 @@ POST /commands/{id}/status
       }
     },
     {
-      "name": "set_team",
+      "name": "set_time",
       "params": {
-        "team": { "type": "string", "min": 1, "max": 32 }
+        "name": { "type": "string", "min": 1, "max": 6 },
+        "value": { "type": "number", "min": 0, "max": 9999999999 }
+      }
+    },
+    {
+      "name": "get_time",
+      "params": {
+        "name": { "type": "string", "min": 1, "max": 6 }
       }
     }
   ]

@@ -84,6 +84,9 @@ function Agent:reportError(info)
 	if self.state and self.state.clearAction then
 		self.state:clearAction()
 	end
+	if self.state and self.state.resetTimers then
+		self.state:resetTimers()
+	end
 	self.config.customData.disconnect = info
 	self:_sendStatus()
 end
@@ -94,6 +97,9 @@ function Agent:clearError()
 	end
 	if self.state and self.state.clearAction then
 		self.state:clearAction()
+	end
+	if self.state and self.state.resetTimers then
+		self.state:resetTimers()
 	end
 	self.config.customData.disconnect = nil
 	self:_sendStatus()

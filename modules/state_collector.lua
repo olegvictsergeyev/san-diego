@@ -237,6 +237,31 @@ function StateCollector:shouldResetAction(commandName)
 	return true
 end
 
+function StateCollector:setTimer(name, value)
+	if not self._timers then
+		self._timers = {}
+	end
+	self._timers[name] = tonumber(value) or os.time()
+end
+
+function StateCollector:getTimerElapsed(name)
+	local t = self._timers and self._timers[name]
+	if not t then
+		return 0
+	end
+	return os.time() - t
+end
+
+function StateCollector:resetTimers()
+	self._timers = {
+		time_1 = os.time(),
+	}
+end
+
+function StateCollector:getTimerNameOrDefault(name)
+	return self:getTimerElapsed(name)
+end
+
 function StateCollector:_formatMskTime(timestamp)
 	if not timestamp then return nil end
 	local t = os.date("!*t", timestamp + 3 * 3600)
@@ -280,6 +305,11 @@ function StateCollector:getAll(custom)
 		team = self:getTeam(),
 		balance = self:getBalance(),
 		action = self._action or "",
+		time_1 = self:getTimerElapsed("time_1"),
+		time_2 = self:getTimerElapsed("time_2"),
+		time_3 = self:getTimerElapsed("time_3"),
+		time_4 = self:getTimerElapsed("time_4"),
+		time_5 = self:getTimerElapsed("time_5"),
 	}
 
 	if self._commandName then
