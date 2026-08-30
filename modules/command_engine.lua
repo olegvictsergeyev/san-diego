@@ -91,6 +91,27 @@ function CommandEngine:_getHrp()
 	return nil
 end
 
+function CommandEngine:_getPlayerHrp(player)
+	if not player then
+		return nil
+	end
+	local character = player.Character
+	if not character then
+		return nil
+	end
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	if hrp and hrp:IsA("BasePart") then
+		return hrp
+	end
+	local ok, found = pcall(function()
+		return character:WaitForChild("HumanoidRootPart", 5)
+	end)
+	if ok and found and found:IsA("BasePart") then
+		return found
+	end
+	return nil
+end
+
 function CommandEngine:_getHumanoid()
 	local character = self:_getCharacter()
 	if not character then return nil end
@@ -1367,29 +1388,8 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera, turnSpeed)
 
 	local function cameraCFrameFromYaw(yaw)
 		if not (hrp and hrp.Parent) then
-	return nil
-end
-
-function CommandEngine:_getPlayerHrp(player)
-	if not player then
-		return nil
-	end
-	local character = player.Character
-	if not character then
-		return nil
-	end
-	local hrp = character:FindFirstChild("HumanoidRootPart")
-	if hrp and hrp:IsA("BasePart") then
-		return hrp
-	end
-	local ok, found = pcall(function()
-		return character:WaitForChild("HumanoidRootPart", 5)
-	end)
-	if ok and found and found:IsA("BasePart") then
-		return found
-	end
-	return nil
-end
+			return nil
+		end
 		local fakeCf = CFrame.new(hrp.Position) * CFrame.Angles(0, yaw, 0)
 		local look = fakeCf.LookVector
 		return CFrame.new(hrp.Position - look * 10 + Vector3.new(0, 5, 0), hrp.Position + look * 10)

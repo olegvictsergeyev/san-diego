@@ -20,7 +20,7 @@ end
 
 function Autoexec:_makeLoaderCode(loaderUrl)
 	local baseUrl = tostring(loaderUrl):match("(.+)/final/agent%.lua$") or tostring(loaderUrl)
-	return 'getgenv().SanDiegoAgentBaseUrl = "' .. baseUrl .. '"\ngetgenv().SanDiegoAgentRunning = nil\ngetgenv().SanDiegoAgentRunningJobId = nil\nloadstring(game:HttpGet("' .. loaderUrl .. '?nocache=" .. tostring(tick())))()'
+	return 'getgenv().SanDiegoAgentBaseUrl = "' .. baseUrl .. '"\nloadstring(game:HttpGet("' .. loaderUrl .. '?nocache=" .. tostring(tick())))()'
 end
 
 function Autoexec:install(loaderUrl)

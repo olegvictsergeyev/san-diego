@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "1.15.0",
+    version = "1.15.1",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -292,12 +292,30 @@ local function updateInfoLabels()
     end
 end
 
+local function cleanupExistingUi()
+    local hui = Compat.gethui()
+    for _, root in ipairs({ game.CoreGui, hui }) do
+        for _, sg in ipairs(root:GetChildren()) do
+            if sg:IsA("ScreenGui") then
+                local name = sg.Name
+                if name == "San Diego Agent" or name:find("SanDiegoAgentToggle") then
+                    pcall(function()
+                        sg:Destroy()
+                    end)
+                end
+            end
+        end
+    end
+end
+
 local function buildUI()
     local Orion = loadOrion()
     if not Orion then
         warn("[SanDiegoAgent][UI] buildUI aborted: Orion not loaded")
         return
     end
+
+    cleanupExistingUi()
 
     local hui = Compat.gethui()
     local existingGuis = {}
