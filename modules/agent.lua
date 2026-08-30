@@ -308,7 +308,7 @@ function Agent:_handleCommand(command)
 	-- Heartbeat so server does not mark command as declined while running.
 	self:_startCommandHeartbeat(command)
 
-	self:_log("INFO", "starting command execution", command.id, command.name)
+	self:_log("INFO", "executing command", command.id, command.name)
 
 	-- Command timeout to prevent worker from getting stuck forever.
 	local commandFinished = false
@@ -399,7 +399,7 @@ function Agent:_fetcherLoop()
 			self:_log("ERROR", "fetcher loop error:", tostring(command))
 			task.wait(self.config.commandRetryDelay)
 		elseif command then
-			self:_log("INFO", "fetched command", command.id, command.name)
+			self:_log("INFO", "received command from backend", command.id, command.name)
 			if command.name == "cancel" then
 				self:_handleCancel(command)
 			else
