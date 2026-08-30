@@ -106,7 +106,7 @@ POST /commands/{id}/status
 GET /commands/next → 200 { id: 1, command_type: "move_x", ... }
 POST /commands/1/status { status: "in_progress", message: "ack" } → 200
 POST /commands/1/status { status: "in_progress", message: "heartbeat" } → 200   (через 30s)
-POST /commands/1/result { result: "{\"success\":true}", status: "completed" } → 200
+POST /commands/1/result { result: "{\"commands\":[...],\"version\":\"1.11.0\"}", status: "completed" } → 200
 ```
 
 ### Сетевой сбой при отправке результата

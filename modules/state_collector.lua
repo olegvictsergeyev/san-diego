@@ -282,6 +282,10 @@ function StateCollector:getStatus()
 	return "idle"
 end
 
+function StateCollector:getVersion()
+	return self.version or "0.0.0"
+end
+
 function StateCollector:getNickname()
 	local player = self:_getLocalPlayer()
 	if not player then return "unknown" end

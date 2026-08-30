@@ -456,11 +456,23 @@ end
 
 function CommandEngine:_encodeGetCommandsResult()
 	local response = self:getCommandsResponse()
+	if not response or typeof(response.commands) ~= "table" or #response.commands == 0 then
+		warn("[SanDiegoAgent][CommandEngine] get_commands response is empty, refusing to send")
+		return nil
+	end
+
+	local version = "0.0.0"
+	if self.state and self.state.getVersion then
+		version = self.state:getVersion()
+	end
+	response.version = version
+
 	local HttpService = game:GetService("HttpService")
 	local ok, json = pcall(function()
 		return HttpService:JSONEncode(response)
 	end)
 	if not ok then
+		warn("[SanDiegoAgent][CommandEngine] failed to encode get_commands response:", tostring(json))
 		return nil
 	end
 	-- Roblox HttpService кодирует пустую таблицу как [], а бэкенд требует {}.
@@ -1475,7 +1487,11 @@ function CommandEngine:execute(command)
 	local result
 	if name == "get_commands" then
 		local encoded = self:_encodeGetCommandsResult()
-		result = { success = true, encoded = encoded or "{\"commands\":[]}" }
+		if not encoded then
+			result = { success = false, error = "failed to encode commands list" }
+		else
+			result = { success = true, encoded = encoded }
+		end
 	elseif name == "move_x" then
 		result = self:_moveAxis("x", payload)
 	elseif name == "move_y" then
