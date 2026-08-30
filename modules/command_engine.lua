@@ -828,22 +828,27 @@ function CommandEngine:_holdKeyCommand(payload)
 	end
 
 	local VirtualInputManager = game:GetService("VirtualInputManager")
-	local ok, err = pcall(function()
-		VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
-		if duration > 0 then
-			task.wait(duration / 1000)
-			VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
-		else
-			task.wait()
-			VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
-		end
-	end)
-	if not ok then
-		return { success = false, error = "VirtualInputManager failed: " .. tostring(err) }
+
+	local function sendPress(pressed)
+		pcall(function()
+			VirtualInputManager:SendKeyEvent(pressed, keyCode, false, game)
+		end)
 	end
 
-	if self:_isCancelled() then
-		return { success = false, error = "cancelled" }
+	sendPress(true)
+
+	if duration > 0 then
+		-- Запускаем отпускание клавиши в фоне, чтобы команда не блокировала воркер.
+		local connection
+		connection = task.delay(duration / 1000, function()
+			sendPress(false)
+			if connection then
+				connection = nil
+			end
+		end)
+	else
+		task.wait()
+		sendPress(false)
 	end
 
 	return { success = true, data = { key = key, durationMs = duration } }

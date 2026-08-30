@@ -209,7 +209,13 @@ function Agent:_handleCommand(command)
 	self.currentCommand = command
 	local startedAt = os.time()
 	self.state:setCommandState("in_progress", command.name, startedAt)
-	self:_sendStatus(true)
+
+	local startSendOk, startSendErr = pcall(function()
+		self:_sendStatus(true)
+	end)
+	if not startSendOk then
+		self:_log("ERROR", "failed to send status at command start:", tostring(startSendErr))
+	end
 
 	if self.state and self.state.shouldResetAction and self.state:shouldResetAction(command.name) then
 		self.state:clearAction()
