@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "1.10.6",
+    version = "1.11.0",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -40,6 +40,7 @@ local CONFIG = {
             http_client = base .. "/modules/http_client.lua",
             state_collector = base .. "/modules/state_collector.lua",
             command_engine = base .. "/modules/command_engine.lua",
+            result_store = base .. "/modules/result_store.lua",
             agent = base .. "/modules/agent.lua",
             private_server = base .. "/modules/private_server.lua",
             popup_closer = base .. "/modules/popup_closer.lua",
@@ -93,6 +94,7 @@ local DisconnectWatcher = loadModule("disconnect_watcher")
 local ToggleUI = loadModule("ui_toggle")
 local Autoexec = loadModule("autoexec")
 local CommandEngine = loadModule("command_engine")
+local ResultStore = loadModule("result_store")
 local Agent = loadModule("agent")
 local Afk = loadModule("afk")
 
@@ -122,7 +124,8 @@ local function makeAgent()
     local afk = Afk.new(CONFIG)
     local engine = CommandEngine.new(privateServer, afk, state)
     privateServer:setCommandEngine(engine)
-    return Agent.new(CONFIG, http, state, engine, afk)
+    local resultStore = ResultStore.new(Compat, state:getNickname())
+    return Agent.new(CONFIG, http, state, engine, afk, resultStore)
 end
 
 local function startWatcher()

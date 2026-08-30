@@ -335,7 +335,7 @@ end
 local Agent = {}
 Agent.__index = Agent
 
-function Agent.new(config, httpClient, stateCollector, commandEngine)
+function Agent.new(config, httpClient, stateCollector, commandEngine, afk, resultStore)
     local self = setmetatable({}, Agent)
     self.config = {
         baseUrl = config.baseUrl,
@@ -591,7 +591,7 @@ getgenv().StopSanDiegoAgent = false
 local http = CONFIG.useMockHttp and MockHttpClient.new(CONFIG.baseUrl) or HttpClient.new(CONFIG.baseUrl)
 local state = StateCollector.new(CONFIG.balancePath)
 local engine = CommandEngine.new()
-local agent = Agent.new(CONFIG, http, state, engine)
+local agent = Agent.new(CONFIG, http, state, engine, nil, nil)
 
 if CONFIG.useMockHttp then
     http:enqueueCommand("get_commands", {})

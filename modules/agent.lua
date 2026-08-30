@@ -23,7 +23,7 @@ end
 local Agent = {}
 Agent.__index = Agent
 
-function Agent.new(config, httpClient, stateCollector, commandEngine, afk)
+function Agent.new(config, httpClient, stateCollector, commandEngine, afk, resultStore)
 	local self = setmetatable({}, Agent)
 
 	self.config = {
@@ -40,12 +40,14 @@ function Agent.new(config, httpClient, stateCollector, commandEngine, afk)
 	self.state = stateCollector
 	self.engine = commandEngine
 	self.afk = afk
+	self.resultStore = resultStore
 
 	self.running = false
 	self.currentCommand = nil
 	self.commandQueue = {}
 	self.lastStatusData = nil
 	self.lastStatusSendAt = 0
+	self.currentCommandHeartbeat = nil
 
 	return self
 end
@@ -132,19 +134,25 @@ function Agent:_resultToString(result)
 end
 
 function Agent:_sendCommandResult(commandId, result, status)
-	if not commandId then return end
+	if not commandId then
+		return false
+	end
 	local resultString = self:_resultToString(result)
 	local body = { result = resultString, status = status }
 	local ok, res = self.http:post("/commands/" .. tostring(commandId) .. "/result", body)
 	if ok then
 		self:_log("INFO", "command result sent", commandId, status, res.statusCode)
+		return true
 	else
 		self:_log("ERROR", "command result send failed:", commandId, tostring(res))
+		return false
 	end
 end
 
 function Agent:_updateCommandStatus(commandId, status, message)
-	if not commandId then return end
+	if not commandId then
+		return false
+	end
 	local body = { status = status }
 	if message then
 		body.message = message
@@ -152,9 +160,85 @@ function Agent:_updateCommandStatus(commandId, status, message)
 	local ok, res = self.http:post("/commands/" .. tostring(commandId) .. "/status", body)
 	if ok then
 		self:_log("INFO", "command status updated", commandId, status, res.statusCode)
+		return true
 	else
 		self:_log("ERROR", "command status update failed:", commandId, tostring(res))
+		return false
 	end
+end
+
+function Agent:_sendPendingResults()
+	if not self.resultStore then
+		return
+	end
+	local pending = self.resultStore:getPending()
+	if not pending or next(pending) == nil then
+		return
+	end
+
+	for commandId, item in pairs(pending) do
+		if self:_sendCommandResult(commandId, item.result, item.status) then
+			self.resultStore:markSent(commandId)
+		else
+			self.resultStore:incrementAttempt(commandId)
+		end
+	end
+end
+
+function Agent:_retryLoop()
+	while self.running do
+		task.wait(10)
+		if not self.running then
+			break
+		end
+		local ok, err = pcall(function()
+			self:_sendPendingResults()
+		end)
+		if not ok then
+			self:_log("ERROR", "retry loop error:", tostring(err))
+		end
+	end
+end
+
+function Agent:_getCommandTimeout(command)
+	local payload = command.payload or {}
+	if command.name == "pause" then
+		local duration = tonumber(payload.duration) or 0
+		return math.clamp(duration + 10, 10, 90000)
+	end
+	if command.name == "hold_key" then
+		local duration = tonumber(payload.duration) or 0
+		return math.clamp(duration / 1000 + 10, 10, 70)
+	end
+	if command.name == "join_private_server" then
+		return 60
+	end
+	return 300
+end
+
+function Agent:_startCommandHeartbeat(command)
+	if self.currentCommandHeartbeat then
+		self.currentCommandHeartbeat = nil
+	end
+	local commandId = command.id
+	self.currentCommandHeartbeat = true
+	task.spawn(function()
+		while self.currentCommandHeartbeat and self.currentCommand and self.currentCommand.id == commandId do
+			task.wait(30)
+			if self.currentCommand and self.currentCommand.id == commandId then
+				local ok = pcall(function()
+					self:_updateCommandStatus(commandId, "in_progress", "heartbeat")
+				end)
+				if not ok then
+					self:_log("ERROR", "command heartbeat failed for", commandId)
+				end
+			end
+		end
+	end)
+end
+
+function Agent:_stopCommandHeartbeat()
+	self.currentCommandHeartbeat = nil
 end
 
 function Agent:_fetchNextCommand()
@@ -176,7 +260,6 @@ function Agent:_fetchNextCommand()
 		return nil
 	end
 
-	-- Long poll таймаут: сервер возвращает 200 + null (или 204).
 	if res.statusCode == 204 or not res.body then
 		return nil
 	end
@@ -185,13 +268,11 @@ function Agent:_fetchNextCommand()
 		return nil
 	end
 
-	-- Backend может возвращать команду напрямую или в поле command.
 	local command = res.body.command or res.body
 	if not command or not command.id then
 		return nil
 	end
 
-	-- Адаптируем поля backend'а к внутреннему формату агента.
 	command.name = command.command_type or command.name
 	if typeof(command.payload) == "string" and command.payload ~= "" then
 		local parseOk, parsed = pcall(function()
@@ -221,15 +302,34 @@ function Agent:_handleCommand(command)
 		self.state:clearAction()
 	end
 
+	-- Acknowledge command receipt to backend.
+	pcall(function()
+		self:_updateCommandStatus(command.id, "in_progress", "ack")
+	end)
+
+	-- Heartbeat so server does not mark command as declined while running.
+	self:_startCommandHeartbeat(command)
+
+	-- Command timeout to prevent worker from getting stuck forever.
+	local commandFinished = false
+	local timeout = self:_getCommandTimeout(command)
+	local timeoutConn = task.delay(timeout, function()
+		if not commandFinished then
+			self:_log("WARN", "command timed out, requesting cancel", command.id, command.name, timeout)
+			self.engine:requestCancel()
+		end
+	end)
+
 	local ok, result = pcall(function()
 		return self.engine:execute(command)
 	end)
 
+	commandFinished = true
+
+	local status = "completed"
 	if not ok then
 		result = { success = false, error = tostring(result) }
 	end
-
-	local status = "completed"
 	if not result.success then
 		status = "error"
 	end
@@ -237,16 +337,26 @@ function Agent:_handleCommand(command)
 		status = "cancelled"
 	end
 
+	self:_stopCommandHeartbeat()
+
 	if status == "error" then
-		self:_sendCommandResult(command.id, result, "error")
 		self.state:setCommandState("error", command.name, startedAt)
-	elseif status == "cancelled" then
-		self:_sendCommandResult(command.id, result, "cancelled")
-		self.state:setCommandState("idle", nil, nil)
 	else
-		self:_sendCommandResult(command.id, result, "completed")
 		self.state:setCommandState("idle", nil, nil)
 	end
+
+	local resultString = self:_resultToString(result)
+
+	-- Persist result for at-least-once delivery.
+	if self.resultStore then
+		local saved = self.resultStore:save(command.id, resultString, status)
+		if not saved then
+			self:_log("WARN", "failed to persist result for retry", command.id)
+		end
+	end
+
+	-- Try to send immediately, then retry loop will handle failures.
+	self:_sendPendingResults()
 
 	self.currentCommand = nil
 
@@ -265,15 +375,23 @@ function Agent:_handleCancel(command)
 	self:_log("INFO", "received cancel command", command.id, "cancelling", cancelledId or "none")
 	self.engine:requestCancel()
 	if cancelledId then
-		self:_updateCommandStatus(cancelledId, "cancelled", "cancelled by user")
+		pcall(function()
+			self:_updateCommandStatus(cancelledId, "cancelled", "cancelled by user")
+		end)
 	end
 	local resultData = {}
 	if cancelledId then resultData.cancelledCommandId = cancelledId end
-	self:_sendCommandResult(command.id, { success = true, data = resultData }, "completed")
+	local resultString = self:_resultToString({ success = true, data = resultData })
+	if self.resultStore then
+		self.resultStore:save(command.id, resultString, "completed")
+	end
+	self:_sendPendingResults()
 end
 
 function Agent:_fetcherLoop()
 	while self.running do
+		-- Пока выполняется обычная команда, новые команды могут быть важны (например, cancel),
+		-- но мы не плодим очередь. Long poll продолжается, cancel обрабатывается сразу.
 		local ok, command = pcall(function()
 			return self:_fetchNextCommand()
 		end)
@@ -302,7 +420,12 @@ function Agent:_workerLoop()
 			end)
 			if not ok then
 				self:_log("ERROR", "worker loop error:", tostring(err))
-				self:_sendCommandResult(command.id, { success = false, error = tostring(err) }, "error")
+				local resultString = self:_resultToString({ success = false, error = tostring(err) })
+				if self.resultStore then
+					self.resultStore:save(command.id, resultString, "error")
+				end
+				self:_sendPendingResults()
+				self.currentCommand = nil
 			end
 		else
 			task.wait(0.1)
@@ -338,6 +461,11 @@ function Agent:start()
 	-- Сбрасываем возможный disconnect из прошлой сессии.
 	self:clearError()
 
+	-- Пытаемся доставить результаты, оставшиеся с прошлого запуска.
+	pcall(function()
+		self:_sendPendingResults()
+	end)
+
 	task.spawn(function()
 		self:_statusLoop()
 	end)
@@ -348,6 +476,10 @@ function Agent:start()
 
 	task.spawn(function()
 		self:_workerLoop()
+	end)
+
+	task.spawn(function()
+		self:_retryLoop()
 	end)
 
 	if self.afk then
@@ -362,6 +494,7 @@ end
 function Agent:stop()
 	self.running = false
 	self.engine:requestCancel()
+	self:_stopCommandHeartbeat()
 	if self.afk then
 		self.afk:stop()
 	end
