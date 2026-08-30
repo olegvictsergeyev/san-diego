@@ -352,11 +352,20 @@ function Agent:_handleCommand(command)
 		local saved = self.resultStore:save(command.id, resultString, status)
 		if not saved then
 			self:_log("WARN", "failed to persist result for retry", command.id)
+		else
+			self:_log("INFO", "command result persisted for delivery", command.id)
 		end
 	end
 
 	-- Try to send immediately, then retry loop will handle failures.
 	self:_sendPendingResults()
+
+	if self.resultStore then
+		local stillPending = self.resultStore:getPending()[tostring(command.id)] ~= nil
+		if stillPending then
+			self:_log("WARN", "command finished but result not delivered; queued for retry", command.id, command.name)
+		end
+	end
 
 	self.currentCommand = nil
 
@@ -423,8 +432,12 @@ function Agent:_workerLoop()
 				local resultString = self:_resultToString({ success = false, error = tostring(err) })
 				if self.resultStore then
 					self.resultStore:save(command.id, resultString, "error")
+					self:_log("WARN", "command failed; result persisted for retry", command.id)
 				end
 				self:_sendPendingResults()
+				if self.resultStore and self.resultStore:getPending()[tostring(command.id)] ~= nil then
+					self:_log("WARN", "command error result queued for retry", command.id)
+				end
 				self.currentCommand = nil
 			end
 		else
