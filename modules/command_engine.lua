@@ -278,9 +278,9 @@ function CommandEngine:getCommandsSpec()
 				wait_seconds = {
 					type = "integer",
 					required = false,
-					min = 2,
+					min = 0,
 					max = 60,
-					description = "Секунд между проверками после respawn (по умолчанию 5)",
+					description = "Секунд между проверками после respawn (по умолчанию 5, минимум 0 — возможна переплата)",
 				},
 				move_to_target = {
 					type = "string",
@@ -312,9 +312,9 @@ function CommandEngine:getCommandsSpec()
 				wait_seconds = {
 					type = "integer",
 					required = false,
-					min = 2,
+					min = 0,
 					max = 60,
-					description = "Секунд после respawn перед финальной проверкой (по умолчанию 5)",
+					description = "Секунд после respawn перед финальной проверкой (по умолчанию 5, минимум 0 — возможна переплата)",
 				},
 				move_to_target = {
 					type = "string",
@@ -945,7 +945,7 @@ function CommandEngine:_transferMoneyViaRespawn(payload)
 	elseif typeof(waitSeconds) ~= "number" or waitSeconds % 1 ~= 0 then
 		return { success = false, error = "param 'wait_seconds' must be an integer" }
 	else
-		waitSeconds = math.clamp(waitSeconds, 2, 60)
+		waitSeconds = math.clamp(waitSeconds, 0, 60)
 	end
 
 	local moveToTarget = payload and payload.move_to_target
@@ -1098,7 +1098,7 @@ function CommandEngine:_respawnForMoney(payload)
 	elseif typeof(waitSeconds) ~= "number" or waitSeconds % 1 ~= 0 then
 		return { success = false, error = "param 'wait_seconds' must be an integer" }
 	else
-		waitSeconds = math.clamp(waitSeconds, 2, 60)
+		waitSeconds = math.clamp(waitSeconds, 0, 60)
 	end
 
 	local moveToTarget = payload and payload.move_to_target
