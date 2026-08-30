@@ -49,6 +49,8 @@ function Agent.new(config, httpClient, stateCollector, commandEngine, afk, resul
 	self.lastStatusSendAt = 0
 	self.currentCommandHeartbeat = nil
 
+	self.lastCommandFinishedAt = 0
+
 	return self
 end
 
@@ -383,6 +385,7 @@ function Agent:_handleCommand(command)
 	end
 
 	self:_log("INFO", "command finished", command.id, command.name, status)
+	self.lastCommandFinishedAt = tick()
 end
 
 function Agent:_handleCancel(command)
@@ -504,7 +507,14 @@ function Agent:start()
 	if self.afk then
 		local afk = self.afk
 		afk:setBusyCheck(function()
-			return self.currentCommand ~= nil
+			if self.currentCommand ~= nil then
+				return true
+			end
+			-- Не мешать между командами, если последняя команда закончилась недавно.
+			if self.lastCommandFinishedAt and tick() - self.lastCommandFinishedAt < 15 then
+				return true
+			end
+			return false
 		end)
 		afk:start()
 	end
