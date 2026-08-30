@@ -160,6 +160,15 @@ POST /commands/{id}/status
       }
     },
     {
+      "name": "respawn_for_money",
+      "params": {
+        "identifier": { "type": "string", "min": 1, "max": 64 },
+        "amount": { "type": "number", "min": 0, "max": 1000000000 },
+        "wait_seconds": { "type": "number", "min": 2, "max": 60 },
+        "move_to_target": { "type": "string", "min": 2, "max": 3 }
+      }
+    },
+    {
       "name": "jump",
       "params": {}
     },

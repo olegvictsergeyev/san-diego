@@ -269,6 +269,42 @@ function CommandEngine:getCommandsSpec()
 					description = "Подбегать к цели перед respawn'ом: 'on' или 'off' (по умолчанию 'on')",
 				},
 			},
+		},
+		{
+			name = "respawn_for_money",
+			description = "Одна итерация передачи денег целевому игроку: проверка, подход, respawn, повторная проверка",
+			params = {
+				identifier = {
+					type = "string",
+					required = true,
+					min = 1,
+					max = 64,
+					description = "Имя аккаунта, display name или user_id целевого игрока",
+				},
+				amount = {
+					type = "integer",
+					required = true,
+					min = 0,
+					max = 1000000000,
+					description = "Целевой баланс, которого нужно достичь",
+				},
+				wait_seconds = {
+					type = "integer",
+					required = false,
+					min = 2,
+					max = 60,
+					description = "Секунд после respawn перед финальной проверкой (по умолчанию 5)",
+				},
+				move_to_target = {
+					type = "string",
+					required = false,
+					min = 2,
+					max = 3,
+					description = "Подбегать к цели перед respawn'ом: 'on' или 'off' (по умолчанию 'on')",
+				},
+			},
+		},
+			},
 		{
 			name = "jump",
 			description = "Подпрыгнуть",
@@ -1017,6 +1053,153 @@ function CommandEngine:_transferMoneyViaRespawn(payload)
 			target_name = targetPlayer.Name,
 			attempts = attempts,
 			final_balance = lastBalance,
+			target_amount = amount,
+		},
+	}
+end
+
+function CommandEngine:_respawnForMoney(payload)
+	local identifier = payload and payload.identifier
+	if identifier == nil or (typeof(identifier) ~= "string" and typeof(identifier) ~= "number") then
+		return { success = false, error = "param 'identifier' is required (string or number)" }
+	end
+
+	local amount = payload and payload.amount
+	if typeof(amount) ~= "number" or amount % 1 ~= 0 then
+		return { success = false, error = "param 'amount' must be an integer" }
+	end
+	if amount < 0 or amount > 1000000000 then
+		return { success = false, error = "param 'amount' out of range [0, 1000000000]" }
+	end
+
+	local waitSeconds = payload and payload.wait_seconds
+	if waitSeconds == nil then
+		waitSeconds = 5
+	elseif typeof(waitSeconds) ~= "number" or waitSeconds % 1 ~= 0 then
+		return { success = false, error = "param 'wait_seconds' must be an integer" }
+	else
+		waitSeconds = math.clamp(waitSeconds, 2, 60)
+	end
+
+	local moveToTarget = payload and payload.move_to_target
+	if moveToTarget == nil then
+		moveToTarget = true
+	elseif typeof(moveToTarget) == "string" then
+		moveToTarget = moveToTarget:lower() ~= "off" and moveToTarget:lower() ~= "false"
+	else
+		moveToTarget = not not moveToTarget
+	end
+
+	local targetPlayer, err = self:_resolvePlayer(identifier)
+	if not targetPlayer then
+		return { success = false, error = err or "target player not found" }
+	end
+
+	local player = self:_getPlayer()
+	if not player then
+		return { success = false, error = "LocalPlayer not found" }
+	end
+
+	if self:_isCancelled() then
+		return { success = false, error = "cancelled" }
+	end
+
+	local beforeBalance = self:_getPlayerBalanceFromReplicatedStats(targetPlayer)
+	warn("[SanDiegoAgent][CommandEngine] respawn_for_money start: target balance", tostring(beforeBalance), "target amount", tostring(amount))
+
+	if beforeBalance and beforeBalance >= amount then
+		return {
+			success = true,
+			data = {
+				target_user_id = targetPlayer.UserId,
+				target_name = targetPlayer.Name,
+				respawned = false,
+				reached = true,
+				before_balance = beforeBalance,
+				after_balance = beforeBalance,
+				target_amount = amount,
+			},
+		}
+	end
+
+	if moveToTarget then
+		local targetHrp = self:_getPlayerHrp(targetPlayer)
+		if targetHrp then
+			local moveResult = self:_moveTo({ x = math.round(targetHrp.Position.X), z = math.round(targetHrp.Position.Z), speed = 10 })
+			if not moveResult.success then
+				warn("[SanDiegoAgent][CommandEngine] failed to move to target before respawn:", tostring(moveResult.error))
+			end
+		end
+	end
+
+	local afterMoveBalance = self:_getPlayerBalanceFromReplicatedStats(targetPlayer)
+	if afterMoveBalance and afterMoveBalance >= amount then
+		return {
+			success = true,
+			data = {
+				target_user_id = targetPlayer.UserId,
+				target_name = targetPlayer.Name,
+				respawned = false,
+				reached = true,
+				before_balance = beforeBalance,
+				after_balance = afterMoveBalance,
+				target_amount = amount,
+			},
+		}
+	end
+
+	local humanoid = self:_getHumanoid()
+	if humanoid and humanoid.Health > 0 then
+		if self:_isCancelled() then
+			return { success = false, error = "cancelled" }
+		end
+		humanoid.Health = 0
+	end
+
+	local added = false
+	local conn
+	conn = player.CharacterAdded:Connect(function()
+		added = true
+		if conn then
+			conn:Disconnect()
+			conn = nil
+		end
+	end)
+	task.delay(15, function()
+		if conn then
+			conn:Disconnect()
+			conn = nil
+		end
+	end)
+
+	local waited = 0
+	while not added and waited < 15 do
+		if self:_isCancelled() then
+			if conn then
+				conn:Disconnect()
+				conn = nil
+			end
+			return { success = false, error = "cancelled" }
+		end
+		task.wait(0.5)
+		waited += 0.5
+	end
+
+	task.wait(waitSeconds)
+
+	local afterBalance = self:_getPlayerBalanceFromReplicatedStats(targetPlayer)
+	local reached = afterBalance and afterBalance >= amount
+	warn("[SanDiegoAgent][CommandEngine] respawn_for_money end: target balance", tostring(afterBalance), "reached", tostring(reached))
+
+	return {
+		success = true,
+		data = {
+			target_user_id = targetPlayer.UserId,
+			target_name = targetPlayer.Name,
+			respawned = true,
+			reached = reached,
+			before_balance = beforeBalance,
+			after_balance = afterBalance,
 			target_amount = amount,
 		},
 	}
@@ -1996,6 +2179,8 @@ function CommandEngine:execute(command)
 		result = self:_respawn()
 	elseif name == "transfer_money_via_respawn" then
 		result = self:_transferMoneyViaRespawn(payload)
+	elseif name == "respawn_for_money" then
+		result = self:_respawnForMoney(payload)
 	elseif name == "jump" then
 		result = self:_jumpCommand()
 	elseif name == "hold_key" then
