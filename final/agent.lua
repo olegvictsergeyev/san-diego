@@ -9,6 +9,7 @@
 ]]
 
 local currentJobId = tostring(game.JobId or "")
+print("[SanDiegoAgent] loader started, JobId:", currentJobId)
 
 local MARKER_FILE = "san-diego-agent-running.json"
 local MARKER_TTL = 30
@@ -47,12 +48,18 @@ end
 
 local function isAlreadyRunning()
     if getgenv().SanDiegoAgentRunning and getgenv().SanDiegoAgentRunningJobId == currentJobId then
+        print("[SanDiegoAgent] skipping start: getgenv flag matches JobId", currentJobId)
         return true
     end
     local marker = readMarker()
-    if marker and marker.running and marker.jobId == currentJobId and marker.timestamp then
+    if marker and marker.running and marker.timestamp then
         local age = tick() - marker.timestamp
-        if age < MARKER_TTL then
+        if marker.jobId == currentJobId and currentJobId ~= "" and age < MARKER_TTL then
+            print("[SanDiegoAgent] skipping start: marker matches JobId", currentJobId, "age", age)
+            return true
+        end
+        if currentJobId == "" and age < 3 then
+            print("[SanDiegoAgent] skipping start: empty JobId, marker age", age)
             return true
         end
     end
@@ -77,6 +84,8 @@ if isAlreadyRunning() then
     warn("[SanDiegoAgent] already running or queued, skipping duplicate start")
     return
 end
+
+print("[SanDiegoAgent] guard passed, starting agent")
 
 setRunning()
 
