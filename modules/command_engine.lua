@@ -676,6 +676,7 @@ function CommandEngine:_moveAxis(axis, payload)
 		if hrp and hrp.Parent then
 			local ok = pcall(function()
 				hrp.CFrame = cf
+				hrp.AssemblyLinearVelocity = Vector3.zero
 			end)
 			if ok then
 				return true
@@ -686,6 +687,7 @@ function CommandEngine:_moveAxis(axis, payload)
 		if hrp then
 			local ok = pcall(function()
 				hrp.CFrame = cf
+				hrp.AssemblyLinearVelocity = Vector3.zero
 			end)
 			return ok
 		end
@@ -770,6 +772,7 @@ function CommandEngine:_moveTo(payload)
 		if hrp and hrp.Parent then
 			local ok = pcall(function()
 				hrp.CFrame = cf
+				hrp.AssemblyLinearVelocity = Vector3.zero
 			end)
 			if ok then
 				return true
@@ -779,6 +782,7 @@ function CommandEngine:_moveTo(payload)
 		if hrp then
 			local ok = pcall(function()
 				hrp.CFrame = cf
+				hrp.AssemblyLinearVelocity = Vector3.zero
 			end)
 			return ok
 		end
@@ -848,9 +852,21 @@ end
 function CommandEngine:_chasePlayer(player, options)
     options = options or {}
     local timeout = tonumber(options.timeout) or 30
-    local threshold = tonumber(options.threshold) or 5
+    local threshold = tonumber(options.threshold) or 10
     local heightThreshold = tonumber(options.heightThreshold) or 5
     local maxStep = tonumber(options.maxStep) or 100
+
+    local function tryTeleportToTarget(targetHrp)
+        local hrp = self:_getHrp()
+        if not hrp then
+            return false
+        end
+        local ok = pcall(function()
+            hrp.CFrame = targetHrp.CFrame * CFrame.new(0, 0, 2)
+            hrp.AssemblyLinearVelocity = Vector3.zero
+        end)
+        return ok
+    end
 
     local start = tick()
     while tick() - start < timeout do
@@ -859,53 +875,57 @@ function CommandEngine:_chasePlayer(player, options)
         end
 
         local targetHrp = self:_getPlayerHrp(player)
-        if not targetHrp then
-            return { success = false, error = "target HumanoidRootPart not found" }
-        end
-
         local localHrp = self:_getHrp()
-        if not localHrp then
-            return { success = false, error = "HumanoidRootPart not found" }
-        end
+        if not targetHrp or not localHrp then
+            warn("[SanDiegoAgent][CommandEngine] HRP lost during chase, retrying...")
+            task.wait(0.1)
+        else
+            local tPos = targetHrp.Position
+            local lPos = localHrp.Position
+            local dist2d = math.sqrt((tPos.X - lPos.X) ^ 2 + (tPos.Z - lPos.Z) ^ 2)
+            local dy = math.abs(tPos.Y - lPos.Y)
 
-        local tPos = targetHrp.Position
-        local lPos = localHrp.Position
-        local dist2d = math.sqrt((tPos.X - lPos.X) ^ 2 + (tPos.Z - lPos.Z) ^ 2)
-        local dy = math.abs(tPos.Y - lPos.Y)
+            if dist2d < threshold and dy < heightThreshold then
+                return { success = true, data = { distance = dist2d, heightDiff = dy } }
+            end
 
-        if dist2d < threshold and dy < heightThreshold then
-            return { success = true, data = { distance = dist2d, heightDiff = dy } }
-        end
-
-        -- Двигаемся к цели короткими сегментами, чтобы успевать за убегающими и не тратить минуты на дальние дистанции.
-        local dx2d = tPos.X - lPos.X
-        local dz2d = tPos.Z - lPos.Z
-        local stepRatio = dist2d > 0 and math.min(1, maxStep / dist2d) or 0
-        local destX = math.round(lPos.X + dx2d * stepRatio)
-        local destZ = math.round(lPos.Z + dz2d * stepRatio)
-
-        local moveResult = self:_moveTo({ x = destX, z = destZ, speed = 10 })
-        if not moveResult.success then
-            warn("[SanDiegoAgent][CommandEngine] chase horizontal move failed:", tostring(moveResult.error))
-            return { success = false, error = "chase horizontal move failed: " .. tostring(moveResult.error) }
-        end
-
-        -- Корректируем высоту (крыши, этажи), но не более чем на maxStep за раз.
-        local newHrp = self:_getHrp()
-        if newHrp then
-            local newY = newHrp.Position.Y
-            local dyNow = tPos.Y - newY
-            if math.abs(dyNow) > 0.5 then
-                local yValue = math.clamp(math.round(dyNow), -maxStep, maxStep)
-                local yResult = self:_moveAxis("y", { value = yValue, speed = 10 })
-                if not yResult.success then
-                    warn("[SanDiegoAgent][CommandEngine] chase vertical move failed:", tostring(yResult.error))
-                    return { success = false, error = "chase vertical move failed: " .. tostring(yResult.error) }
+            -- Если уже близко — телепортируемся точно к цели.
+            if dist2d < 25 and dy < 15 then
+                if tryTeleportToTarget(targetHrp) then
+                    return { success = true, data = { distance = 0, heightDiff = 0, method = "teleport" } }
                 end
             end
-        end
 
-        task.wait(0.03)
+            -- Двигаемся к цели короткими сегментами, чтобы успевать за убегающими и не тратить минуты на дальние дистанции.
+            local dx2d = tPos.X - lPos.X
+            local dz2d = tPos.Z - lPos.Z
+            local stepRatio = dist2d > 0 and math.min(1, maxStep / dist2d) or 0
+            local destX = math.round(lPos.X + dx2d * stepRatio)
+            local destZ = math.round(lPos.Z + dz2d * stepRatio)
+
+            local moveResult = self:_moveTo({ x = destX, z = destZ, speed = 10 })
+            if not moveResult.success then
+                warn("[SanDiegoAgent][CommandEngine] chase horizontal move failed:", tostring(moveResult.error))
+                return { success = false, error = "chase horizontal move failed: " .. tostring(moveResult.error) }
+            end
+
+            -- Корректируем высоту (крыши, этажи), но не более чем на maxStep за раз.
+            local newHrp = self:_getHrp()
+            if newHrp then
+                local newY = newHrp.Position.Y
+                local dyNow = tPos.Y - newY
+                if math.abs(dyNow) > 0.5 then
+                    local yValue = math.clamp(math.round(dyNow), -maxStep, maxStep)
+                    local yResult = self:_moveAxis("y", { value = yValue, speed = 10 })
+                    if not yResult.success then
+                        warn("[SanDiegoAgent][CommandEngine] chase vertical move failed:", tostring(yResult.error))
+                        return { success = false, error = "chase vertical move failed: " .. tostring(yResult.error) }
+                    end
+                end
+            end
+
+            task.wait(0.03)
+        end
     end
 
     return { success = false, error = "chase timeout" }
