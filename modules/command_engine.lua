@@ -920,6 +920,7 @@ function CommandEngine:_transferMoneyViaRespawn(payload)
 
 		local balance = self:_getPlayerBalanceFromReplicatedStats(targetPlayer)
 		lastBalance = balance
+		warn("[SanDiegoAgent][CommandEngine] transfer attempt", attempts, "target balance", tostring(balance), "target amount", tostring(amount))
 		if balance and balance >= amount then
 			return {
 				success = true,
@@ -942,6 +943,22 @@ function CommandEngine:_transferMoneyViaRespawn(payload)
 					warn("[SanDiegoAgent][CommandEngine] failed to move to target before respawn:", tostring(moveResult.error))
 				end
 			end
+		end
+
+		-- Ещё раз проверяем баланс после подхода: может, цель уже достигнута.
+		balance = self:_getPlayerBalanceFromReplicatedStats(targetPlayer)
+		lastBalance = balance
+		if balance and balance >= amount then
+			return {
+				success = true,
+				data = {
+					target_user_id = targetPlayer.UserId,
+					target_name = targetPlayer.Name,
+					attempts = attempts,
+					final_balance = balance,
+					target_amount = amount,
+				},
+			}
 		end
 
 		-- Убиваем локального персонажа, чтобы он дропнул деньги.
