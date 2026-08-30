@@ -8,7 +8,12 @@ function PrivateServer.new(opts)
 	local self = setmetatable({}, PrivateServer)
 	self.loaderUrl = opts and opts.loaderUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main/final/agent.lua"
 	self.compat = opts and opts.compat or nil
+	self.commandEngine = opts and opts.commandEngine or nil
 	return self
+end
+
+function PrivateServer:setCommandEngine(commandEngine)
+	self.commandEngine = commandEngine
 end
 
 function PrivateServer:_queueReload()
@@ -80,6 +85,12 @@ function PrivateServer:joinByCode(code)
 	-- Запускаем в отдельном потоке, потому что успешный телепорт
 	-- может прервать выполнение текущего скрипта.
 	task.spawn(function()
+		-- Отключаем захват камеры перед телепортом, чтобы избежать вылетов.
+		if self.commandEngine and typeof(self.commandEngine.releaseCamera) == "function" then
+			pcall(function()
+				self.commandEngine:releaseCamera()
+			end)
+		end
 		self:_queueReload()
 		pcall(function()
 			joinRemote:InvokeServer(code)

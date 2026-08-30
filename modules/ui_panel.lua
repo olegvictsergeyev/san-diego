@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "1.10.2",
+    version = "1.10.3",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -121,6 +121,7 @@ local function makeAgent()
     local state = StateCollector.new(CONFIG.balancePath, CONFIG.version)
     local afk = Afk.new(CONFIG)
     local engine = CommandEngine.new(privateServer, afk, state)
+    privateServer:setCommandEngine(engine)
     return Agent.new(CONFIG, http, state, engine, afk)
 end
 
