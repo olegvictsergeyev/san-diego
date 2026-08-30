@@ -876,21 +876,28 @@ function CommandEngine:_chasePlayer(player, options)
             return { success = true, data = { distance = dist2d, heightDiff = dy } }
         end
 
-        -- Двигаемся по горизонтали к актуальной позиции цели.
-        local moveResult = self:_moveTo({ x = math.round(tPos.X), z = math.round(tPos.Z), speed = 10 })
+        -- Двигаемся к цели короткими сегментами, чтобы успевать за убегающими и не тратить минуты на дальние дистанции.
+        local maxStep = 50
+        local dx2d = tPos.X - lPos.X
+        local dz2d = tPos.Z - lPos.Z
+        local stepRatio = dist2d > 0 and math.min(1, maxStep / dist2d) or 0
+        local destX = math.round(lPos.X + dx2d * stepRatio)
+        local destZ = math.round(lPos.Z + dz2d * stepRatio)
+
+        local moveResult = self:_moveTo({ x = destX, z = destZ, speed = 10 })
         if not moveResult.success then
             warn("[SanDiegoAgent][CommandEngine] chase horizontal move failed:", tostring(moveResult.error))
             return { success = false, error = "chase horizontal move failed: " .. tostring(moveResult.error) }
         end
 
-        -- Корректируем высоту (крыши, этажи).
+        -- Корректируем высоту (крыши, этажи), но не более чем на maxStep за раз.
         local newHrp = self:_getHrp()
         if newHrp then
             local newY = newHrp.Position.Y
-            local targetY = tPos.Y
-            local dyNow = targetY - newY
+            local dyNow = tPos.Y - newY
             if math.abs(dyNow) > 0.5 then
-                local yResult = self:_moveAxis("y", { value = math.round(dyNow), speed = 10 })
+                local yValue = math.clamp(math.round(dyNow), -maxStep, maxStep)
+                local yResult = self:_moveAxis("y", { value = yValue, speed = 10 })
                 if not yResult.success then
                     warn("[SanDiegoAgent][CommandEngine] chase vertical move failed:", tostring(yResult.error))
                     return { success = false, error = "chase vertical move failed: " .. tostring(yResult.error) }
