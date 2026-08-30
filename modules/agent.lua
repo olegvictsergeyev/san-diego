@@ -243,7 +243,14 @@ function Agent:_handleCommand(command)
 	end
 
 	self.currentCommand = nil
-	self:_sendStatus(true)
+
+	local sendOk, sendErr = pcall(function()
+		self:_sendStatus(true)
+	end)
+	if not sendOk then
+		self:_log("ERROR", "failed to send status after command:", tostring(sendErr))
+	end
+
 	self:_log("INFO", "command finished", command.id, command.name, status)
 end
 
