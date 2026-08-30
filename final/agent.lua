@@ -46,13 +46,13 @@ local function writeMarker(data)
 end
 
 local function isAlreadyRunning()
-    if getgenv().SanDiegoAgentRunning then
+    if getgenv().SanDiegoAgentRunning and getgenv().SanDiegoAgentRunningJobId == currentJobId then
         return true
     end
     local marker = readMarker()
-    if marker and marker.running and marker.timestamp and marker.jobId then
+    if marker and marker.running and marker.jobId == currentJobId and marker.timestamp then
         local age = tick() - marker.timestamp
-        if age < MARKER_TTL and marker.jobId ~= currentJobId then
+        if age < MARKER_TTL then
             return true
         end
     end
