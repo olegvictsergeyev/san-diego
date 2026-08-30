@@ -1095,8 +1095,8 @@ function CommandEngine:_transferMoneyViaRespawn(payload)
 				end
 				return { success = false, error = "cancelled" }
 			end
-			task.wait(0.5)
-			waited += 0.5
+			task.wait(0.05)
+			waited += 0.05
 		end
 
 		-- Даём время игре обновить баланс цели.
@@ -1226,8 +1226,8 @@ function CommandEngine:_respawnForMoney(payload)
 			end
 			return { success = false, error = "cancelled" }
 		end
-		task.wait(0.5)
-		waited += 0.5
+		task.wait(0.05)
+		waited += 0.05
 	end
 
 	task.wait(waitSeconds)
