@@ -304,7 +304,6 @@ function CommandEngine:getCommandsSpec()
 				},
 			},
 		},
-			},
 		{
 			name = "jump",
 			description = "Подпрыгнуть",
