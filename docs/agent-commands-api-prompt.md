@@ -155,8 +155,7 @@ POST /commands/{id}/status
         "identifier": { "type": "string", "min": 1, "max": 64 },
         "amount": { "type": "number", "min": 0, "max": 1000000000 },
         "max_attempts": { "type": "number", "min": 1, "max": 500 },
-        "wait_seconds": { "type": "number", "min": 2, "max": 60 },
-        "move_to_target": { "type": "string", "min": 2, "max": 3 }
+        "wait_seconds": { "type": "number", "min": 0, "max": 60 }
       }
     },
     {
@@ -164,8 +163,7 @@ POST /commands/{id}/status
       "params": {
         "identifier": { "type": "string", "min": 1, "max": 64 },
         "amount": { "type": "number", "min": 0, "max": 1000000000 },
-        "wait_seconds": { "type": "number", "min": 2, "max": 60 },
-        "move_to_target": { "type": "string", "min": 2, "max": 3 }
+        "wait_seconds": { "type": "number", "min": 0, "max": 60 }
       }
     },
     {

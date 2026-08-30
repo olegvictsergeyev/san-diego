@@ -99,8 +99,8 @@ Long-poll. Query-параметры:
 - `move_to` — параметры `x` (number, -7000..7000), `z` (number, -7000..7000) и `speed` (integer, 1..10, опционально, по умолчанию 10). Плавно перемещает персонажа к координатам X/Z с сохранением текущей высоты Y.
 - `pause` — параметр `duration` (number, 0..86400).
 - `respawn` — без параметров.
-- `transfer_money_via_respawn` — цикл: параметры `identifier`, `amount`, `max_attempts`, `wait_seconds`, `move_to_target`. Повторяет respawn, пока баланс цели не достигнет `amount`.
-- `respawn_for_money` — одна итерация: параметры `identifier`, `amount`, `wait_seconds`, `move_to_target`. Проверяет баланс цели, подбегает, делает respawn, ждёт и возвращает `reached`, `before_balance`, `after_balance`, `respawned`.
+- `transfer_money_via_respawn` — цикл: параметры `identifier`, `amount`, `max_attempts`, `wait_seconds`. Повторяет respawn, пока баланс цели не достигнет `amount`. Перед каждым respawn'ом агент преследует цель, чтобы деньги упали рядом.
+- `respawn_for_money` — одна итерация: параметры `identifier`, `amount`, `wait_seconds`. Проверяет баланс цели, преследует её, делает respawn, ждёт и возвращает `reached`, `before_balance`, `after_balance`, `respawned`.
 - `jump` — без параметров, заставляет персонажа подпрыгнуть.
 - `hold_key` — параметры `key` (`string`, 1..32, имя клавиши из `Enum.KeyCode`, например `"E"`) и `duration` (`integer`, 0..60000, миллисекунды). Нажимает клавишу, удерживает указанное время, затем отпускает. `duration = 0` — нажать и сразу отпустить.
 - `join_private_server` — параметр `code` (string, 1..64).

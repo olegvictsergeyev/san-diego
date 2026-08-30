@@ -282,13 +282,6 @@ function CommandEngine:getCommandsSpec()
 					max = 60,
 					description = "Секунд между проверками после respawn (по умолчанию 5, минимум 0 — возможна переплата)",
 				},
-				move_to_target = {
-					type = "string",
-					required = false,
-					min = 2,
-					max = 3,
-					description = "Подбегать к цели перед respawn'ом: 'on' или 'off' (по умолчанию 'on')",
-				},
 			},
 		},
 		{
@@ -315,13 +308,6 @@ function CommandEngine:getCommandsSpec()
 					min = 0,
 					max = 60,
 					description = "Секунд после respawn перед финальной проверкой (по умолчанию 5, минимум 0 — возможна переплата)",
-				},
-				move_to_target = {
-					type = "string",
-					required = false,
-					min = 2,
-					max = 3,
-					description = "Подбегать к цели перед respawn'ом: 'on' или 'off' (по умолчанию 'on')",
 				},
 			},
 		},
@@ -1007,15 +993,6 @@ function CommandEngine:_transferMoneyViaRespawn(payload)
 		waitSeconds = math.clamp(waitSeconds, 0, 60)
 	end
 
-	local moveToTarget = payload and payload.move_to_target
-	if moveToTarget == nil then
-		moveToTarget = true
-	elseif typeof(moveToTarget) == "string" then
-		moveToTarget = moveToTarget:lower() ~= "off" and moveToTarget:lower() ~= "false"
-	else
-		moveToTarget = not not moveToTarget
-	end
-
 	local targetPlayer, err = self:_resolvePlayer(identifier)
 	if not targetPlayer then
 		return { success = false, error = err or "target player not found" }
@@ -1049,12 +1026,10 @@ function CommandEngine:_transferMoneyViaRespawn(payload)
 			}
 		end
 
-		-- Перед смертью подбегаем к цели, чтобы деньги упали рядом.
-		if moveToTarget then
-			local chaseResult = self:_chasePlayer(targetPlayer, { timeout = 10 })
-			if not chaseResult.success then
-				warn("[SanDiegoAgent][CommandEngine] failed to reach target before respawn:", tostring(chaseResult.error))
-			end
+		-- Перед смертью всегда подбегаем к цели, чтобы деньги упали рядом.
+		local chaseResult = self:_chasePlayer(targetPlayer, { timeout = 10 })
+		if not chaseResult.success then
+			warn("[SanDiegoAgent][CommandEngine] failed to reach target before respawn:", tostring(chaseResult.error))
 		end
 
 		-- Ещё раз проверяем баланс после подхода: может, цель уже достигнута.
@@ -1157,15 +1132,6 @@ function CommandEngine:_respawnForMoney(payload)
 		waitSeconds = math.clamp(waitSeconds, 0, 60)
 	end
 
-	local moveToTarget = payload and payload.move_to_target
-	if moveToTarget == nil then
-		moveToTarget = true
-	elseif typeof(moveToTarget) == "string" then
-		moveToTarget = moveToTarget:lower() ~= "off" and moveToTarget:lower() ~= "false"
-	else
-		moveToTarget = not not moveToTarget
-	end
-
 	local targetPlayer, err = self:_resolvePlayer(identifier)
 	if not targetPlayer then
 		return { success = false, error = err or "target player not found" }
@@ -1198,11 +1164,10 @@ function CommandEngine:_respawnForMoney(payload)
 		}
 	end
 
-	if moveToTarget then
-		local chaseResult = self:_chasePlayer(targetPlayer, { timeout = 10 })
-		if not chaseResult.success then
-			warn("[SanDiegoAgent][CommandEngine] failed to reach target before respawn:", tostring(chaseResult.error))
-		end
+	-- Всегда подбегаем к цели перед смертью.
+	local chaseResult = self:_chasePlayer(targetPlayer, { timeout = 10 })
+	if not chaseResult.success then
+		warn("[SanDiegoAgent][CommandEngine] failed to reach target before respawn:", tostring(chaseResult.error))
 	end
 
 	local afterMoveBalance = self:_getPlayerBalanceFromReplicatedStats(targetPlayer)
