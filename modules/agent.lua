@@ -62,15 +62,12 @@ function Agent:_sendStatus(force)
 	local changed = not self.lastStatusData or not deepEqual(self.lastStatusData, data)
 	local heartbeatDue = (tick() - self.lastStatusSendAt) >= 300
 	if not changed and not force and not heartbeatDue then
-		self:_log("INFO", "status skipped: no changes")
 		return
 	end
 	self.lastStatusData = data
 	self.lastStatusSendAt = tick()
 	local ok, res = self.http:post("/game/update", data)
-	if ok then
-		self:_log("INFO", "status sent", res.statusCode)
-	else
+	if not ok then
 		self:_log("ERROR", "status send failed:", tostring(res))
 	end
 end
@@ -139,6 +136,7 @@ function Agent:_sendCommandResult(commandId, result, status)
 	end
 	local resultString = self:_resultToString(result)
 	local body = { result = resultString, status = status }
+	self:_log("INFO", "sending command result", commandId, status)
 	local ok, res = self.http:post("/commands/" .. tostring(commandId) .. "/result", body)
 	if ok then
 		self:_log("INFO", "command result sent", commandId, status, res.statusCode)
@@ -309,6 +307,8 @@ function Agent:_handleCommand(command)
 
 	-- Heartbeat so server does not mark command as declined while running.
 	self:_startCommandHeartbeat(command)
+
+	self:_log("INFO", "starting command execution", command.id, command.name)
 
 	-- Command timeout to prevent worker from getting stuck forever.
 	local commandFinished = false
