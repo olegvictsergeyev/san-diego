@@ -217,7 +217,13 @@ POST /commands/{id}/status
     {
       "name": "get_server_players",
       "params": {}
-    }
+    },
+    {
+      "name": "get_player",
+      "params": {
+        "identifier": { "type": "string", "min": 1, "max": 64 }
+      }
+    },
   ]
 }
 ```

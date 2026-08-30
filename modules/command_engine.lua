@@ -407,8 +407,21 @@ function CommandEngine:getCommandsSpec()
 		},
 		{
 			name = "get_server_players",
-			description = "Вернуть массив объектов со всеми игроками на текущем сервере (roblox_name, display_name, user_id, team, balance, properties, vehicles)",
+			description = "Вернуть массив объектов со всеми игроками на текущем сервере (roblox_name, display_name, user_id, team, balance, properties, money_printers)",
 			params = {},
+		},
+		{
+			name = "get_player",
+			description = "Вернуть объект с данными об одном игроке по имени, display_name или user_id",
+			params = {
+				identifier = {
+					type = "string",
+					required = true,
+					min = 1,
+					max = 64,
+					description = "Имя игрока, display name или user_id",
+				},
+			},
 		},
 		{
 			name = "join_private_server",
@@ -1547,22 +1560,47 @@ function CommandEngine:_getLocalPlayerDataViaRemote()
 	return data, nil
 end
 
-function CommandEngine:_extractVehicleNames(data)
-	local names = {}
-	local seen = {}
-	local sources = { data.OwnedVehicles, data.PurchasedVehicles, data.FavoriteVehicles, data.ClaimedBeachHouseVehicles }
-	for _, src in ipairs(sources) do
-		if typeof(src) == "table" then
-			for _, v in ipairs(src) do
-				local name = typeof(v) == "string" and v or (typeof(v) == "table" and (v.Name or v.name)) or tostring(v)
-				if name and name ~= "" and not seen[name] then
-					seen[name] = true
-					table.insert(names, name)
-				end
-			end
+function CommandEngine:_resolvePlayer(identifier)
+	local Players = game:GetService("Players")
+	if identifier == nil then
+		return nil, "identifier is nil"
+	end
+
+	-- Если число или строка из цифр — считаем UserId.
+	local userId = nil
+	if typeof(identifier) == "number" then
+		userId = identifier
+	elseif typeof(identifier) == "string" then
+		-- Убираем пробелы.
+		local trimmed = identifier:gsub("^%s*(.-)%s*$", "%1")
+		if tonumber(trimmed) then
+			userId = tonumber(trimmed)
 		end
 	end
-	return names
+
+	if userId then
+		local byId = Players:GetPlayerByUserId(userId)
+		if byId then
+			return byId
+		end
+		-- Может быть игрок с таким UserId ещё не загружен, но пусть имя совпадёт.
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p.UserId == userId then
+				return p
+			end
+		end
+		return nil, "player with user_id " .. tostring(userId) .. " not found"
+	end
+
+	-- Иначе ищем по имени или display name (case-insensitive).
+	local name = tostring(identifier):lower()
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Name:lower() == name or p.DisplayName:lower() == name then
+			return p
+		end
+	end
+
+	return nil, "player '" .. tostring(identifier) .. "' not found"
 end
 
 function CommandEngine:_extractBeachHousesFromData(data)
@@ -1613,29 +1651,61 @@ function CommandEngine:_extractBeachHousesFromWorkspace(userId)
 	return houses
 end
 
-function CommandEngine:_extractWorkspaceVehicles(userId)
-	local names = {}
-	local seen = {}
-	local Workspace = game:GetService("Workspace")
-	local vehiclesFolder = Workspace:FindFirstChild("Vehicles")
-	if vehiclesFolder then
-		for _, v in ipairs(vehiclesFolder:GetChildren()) do
-			local ownerId = v:GetAttribute("OwnerUserId") or v:GetAttribute("VehicleOwnerUserId") or v:GetAttribute("DriverUserId")
-			if ownerId and ownerId == userId then
-				if not seen[v.Name] then
-					seen[v.Name] = true
-					table.insert(names, v.Name)
+function CommandEngine:_getSinglePlayerEntry(player, localData)
+	local Players = game:GetService("Players")
+	local localPlayer = Players.LocalPlayer
+	local isLocal = player == localPlayer
+
+	local entry = {
+		roblox_name = player.Name,
+		display_name = player.DisplayName,
+		user_id = player.UserId,
+		team = player.Team and tostring(player.Team.Name) or "Neutral",
+	}
+
+	local balance = self:_getPlayerBalanceFromReplicatedStats(player)
+	local beachHouses = self:_extractBeachHousesFromWorkspace(player.UserId)
+	local apartments = self:_extractApartmentIdsFromWorkspace(player.UserId)
+	local moneyPrinters = nil
+
+	if isLocal and localData then
+		balance = localData.Currency and localData.Currency.Money or balance
+		local dataBeachHouses = self:_extractBeachHousesFromData(localData)
+		for _, name in ipairs(dataBeachHouses) do
+			local found = false
+			for _, existing in ipairs(beachHouses) do
+				if existing == name then
+					found = true
+					break
 				end
+			end
+			if not found then
+				table.insert(beachHouses, name)
+			end
+		end
+		moneyPrinters = 0
+		if typeof(localData.MoneyPrinters) == "table" then
+			for _ in pairs(localData.MoneyPrinters) do
+				moneyPrinters += 1
 			end
 		end
 	end
-	return names
+
+	entry.balance = balance
+	entry.properties = {
+		beach_houses = beachHouses,
+		apartments = apartments,
+	}
+	if moneyPrinters ~= nil then
+		entry.money_printers = moneyPrinters
+	end
+
+	return entry
 end
 
 function CommandEngine:_getServerPlayersCommand()
 	local Players = game:GetService("Players")
 	local localPlayer = Players.LocalPlayer
-	local localUserId = localPlayer and localPlayer.UserId
 	local localData = nil
 	if localPlayer then
 		localData = self:_getLocalPlayerDataViaRemote()
@@ -1646,69 +1716,33 @@ function CommandEngine:_getServerPlayersCommand()
 		if self:_isCancelled() then
 			return { success = false, error = "cancelled" }
 		end
-
-		local entry = {
-			roblox_name = player.Name,
-			display_name = player.DisplayName,
-			user_id = player.UserId,
-			team = player.Team and tostring(player.Team.Name) or "Neutral",
-		}
-
-		local isLocal = player == localPlayer
-		local balance = self:_getPlayerBalanceFromReplicatedStats(player)
-		local vehicles = {}
-		local beachHouses = self:_extractBeachHousesFromWorkspace(player.UserId)
-		local apartments = self:_extractApartmentIdsFromWorkspace(player.UserId)
-		local moneyPrinters = nil
-		local apartmentExpiresAt = nil
-
-		if isLocal and localData then
-			balance = localData.Currency and localData.Currency.Money or balance
-			vehicles = self:_extractVehicleNames(localData)
-			local dataBeachHouses = self:_extractBeachHousesFromData(localData)
-			for _, name in ipairs(dataBeachHouses) do
-				local found = false
-				for _, existing in ipairs(beachHouses) do
-					if existing == name then
-						found = true
-						break
-					end
-				end
-				if not found then
-					table.insert(beachHouses, name)
-				end
-			end
-			moneyPrinters = 0
-			if typeof(localData.MoneyPrinters) == "table" then
-				for _ in pairs(localData.MoneyPrinters) do
-					moneyPrinters += 1
-				end
-			end
-			apartmentExpiresAt = localData.ApartmentPurchaseExpiresAt
-		else
-			local wsVehicles = self:_extractWorkspaceVehicles(player.UserId)
-			for _, name in ipairs(wsVehicles) do
-				table.insert(vehicles, name)
-			end
-		end
-
-		entry.balance = balance
-		entry.properties = {
-			beach_houses = beachHouses,
-			apartments = apartments,
-		}
-		entry.vehicles = vehicles
-		if moneyPrinters ~= nil then
-			entry.money_printers = moneyPrinters
-		end
-		if apartmentExpiresAt ~= nil then
-			entry.apartment_expires_at = apartmentExpiresAt
-		end
-
-		table.insert(result, entry)
+		table.insert(result, self:_getSinglePlayerEntry(player, localData))
 	end
 
 	return { success = true, data = result }
+end
+
+function CommandEngine:_getPlayerCommand(payload)
+	local identifier = payload and payload.identifier
+	if identifier == nil or (typeof(identifier) ~= "string" and typeof(identifier) ~= "number") then
+		return { success = false, error = "param 'identifier' is required (string or number)" }
+	end
+
+	local player, err = self:_resolvePlayer(identifier)
+	if not player then
+		return { success = false, error = err or "player not found" }
+	end
+
+	local localData = nil
+	local Players = game:GetService("Players")
+	if player == Players.LocalPlayer then
+		localData = self:_getLocalPlayerDataViaRemote()
+	end
+
+	return {
+		success = true,
+		data = self:_getSinglePlayerEntry(player, localData),
+	}
 end
 
 function CommandEngine:execute(command)
@@ -1763,6 +1797,8 @@ function CommandEngine:execute(command)
 		result = self:_setTeamCommand(payload)
 	elseif name == "get_server_players" then
 		result = self:_getServerPlayersCommand()
+	elseif name == "get_player" then
+		result = self:_getPlayerCommand(payload)
 	else
 		result = { success = false, error = "unknown command: " .. tostring(name) }
 	end

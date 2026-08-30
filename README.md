@@ -97,7 +97,8 @@ san-diego/
 - `afk` — управление AFK-режимом (`enabled`: `on`/`off`, `interval` в секундах). По умолчанию включён и раз в 5 минут имитирует активность (клик через `VirtualUser` + прыжок), чтобы аккаунт не выкинуло из игры.
 - `set_action` — установить произвольный статус действия в `custom_data.action` (например, `"farm"`). Параметры: `action` (строка, до 32 символов, пустая строка сбрасывает) и `except` (строка, опционально) — список команд через запятую, которые не сбрасывают `action`.
 - `set_time` — установить один из таймеров `time_1`..`time_5`. Параметры: `name` (имя таймера) и `value` (Unix timestamp, опционально). Без `value` используется текущее время. После `respawn` `time_2` сбрасывается автоматически.
-- `get_server_players` — вернуть массив объектов со всеми игроками на текущем сервере. Каждый объект содержит `roblox_name`, `display_name`, `user_id`, `team`, `balance`, `properties` (`beach_houses`, `apartments`) и `vehicles`. Для LocalPlayer дополнительно возвращаются `money_printers` и `apartment_expires_at`.
+- `get_server_players` — вернуть массив объектов со всеми игроками на текущем сервере. Каждый объект содержит `roblox_name`, `display_name`, `user_id`, `team`, `balance`, `properties` (`beach_houses`, `apartments`) и `money_printers` (только для LocalPlayer).
+- `get_player` — вернуть объект с данными об одном игроке. Параметр `identifier` — имя аккаунта, display name или user_id.
 - `set_team` — сменить команду (team) персонажа. Параметр `team` — имя команды из `Teams` (например, `"Police"`, `"Civilian"`).
 
 ## Дисконнект и ошибки
