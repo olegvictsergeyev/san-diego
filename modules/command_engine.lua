@@ -406,6 +406,11 @@ function CommandEngine:getCommandsSpec()
 			},
 		},
 		{
+			name = "get_server_players",
+			description = "Вернуть массив объектов со всеми игроками на текущем сервере (roblox_name, display_name, user_id, team, balance, properties, vehicles)",
+			params = {},
+		},
+		{
 			name = "join_private_server",
 			description = "Перейти на приватный сервер по коду",
 			params = {
@@ -1478,6 +1483,234 @@ function CommandEngine:_joinPrivateServer(payload)
 	return self.privateServer:joinByCode(code)
 end
 
+function CommandEngine:_parseFormattedNumber(text)
+	if typeof(text) == "number" then
+		return text
+	end
+	local s = tostring(text):gsub("[ ,]", "")
+	if s == "" then
+		return nil
+	end
+	local num, suffix = s:match("^([%d%.]+)([KkMmBbTt]?)$")
+	if num then
+		local n = tonumber(num)
+		if n then
+			local lower = suffix:lower()
+			if lower == "k" then
+				n = n * 1e3
+			elseif lower == "m" then
+				n = n * 1e6
+			elseif lower == "b" then
+				n = n * 1e9
+			elseif lower == "t" then
+				n = n * 1e12
+			end
+			return n
+		end
+	end
+	return tonumber(s)
+end
+
+function CommandEngine:_getPlayerBalanceFromReplicatedStats(player)
+	if not player then
+		return nil
+	end
+	local folder = player:FindFirstChild("ReplicatedStats")
+	if not folder then
+		return nil
+	end
+	local money = folder:FindFirstChild("Money")
+	if money and money:IsA("StringValue") then
+		return self:_parseFormattedNumber(money.Value)
+	end
+	return nil
+end
+
+function CommandEngine:_getLocalPlayerDataViaRemote()
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local remote
+	pcall(function()
+		remote = ReplicatedStorage.__remotes.PlayerDataService.GetPlayerData
+	end)
+	if not remote then
+		return nil, "PlayerDataService.GetPlayerData not found"
+	end
+	local ok, data = pcall(function()
+		return remote:InvokeServer()
+	end)
+	if not ok then
+		return nil, tostring(data)
+	end
+	if typeof(data) ~= "table" then
+		return nil, "invalid data"
+	end
+	return data, nil
+end
+
+function CommandEngine:_extractVehicleNames(data)
+	local names = {}
+	local seen = {}
+	local sources = { data.OwnedVehicles, data.PurchasedVehicles, data.FavoriteVehicles, data.ClaimedBeachHouseVehicles }
+	for _, src in ipairs(sources) do
+		if typeof(src) == "table" then
+			for _, v in ipairs(src) do
+				local name = typeof(v) == "string" and v or (typeof(v) == "table" and (v.Name or v.name)) or tostring(v)
+				if name and name ~= "" and not seen[name] then
+					seen[name] = true
+					table.insert(names, name)
+				end
+			end
+		end
+	end
+	return names
+end
+
+function CommandEngine:_extractBeachHousesFromData(data)
+	local names = {}
+	if typeof(data.OwnedBeachHouses) == "table" then
+		for _, v in ipairs(data.OwnedBeachHouses) do
+			local name = typeof(v) == "string" and v or (typeof(v) == "table" and (v.Name or v.name)) or tostring(v)
+			if name and name ~= "" then
+				table.insert(names, name)
+			end
+		end
+	end
+	return names
+end
+
+function CommandEngine:_extractApartmentIdsFromWorkspace(userId)
+	local ids = {}
+	local Workspace = game:GetService("Workspace")
+	local gameplay = Workspace:FindFirstChild("Gameplay")
+	local apartments = gameplay and gameplay:FindFirstChild("Apartments")
+	local doors = apartments and apartments:FindFirstChild("Doors")
+	if doors then
+		for _, door in ipairs(doors:GetChildren()) do
+			local ownerId = door:GetAttribute("ApartmentOwnerUserId")
+			if ownerId and ownerId == userId then
+				local apartmentId = door:GetAttribute("ApartmentId")
+				table.insert(ids, tostring(apartmentId or door.Name))
+			end
+		end
+	end
+	return ids
+end
+
+function CommandEngine:_extractBeachHousesFromWorkspace(userId)
+	local houses = {}
+	local Workspace = game:GetService("Workspace")
+	local gameplay = Workspace:FindFirstChild("Gameplay")
+	local plots = gameplay and gameplay:FindFirstChild("BeachHousePlots")
+	if plots then
+		for _, plot in ipairs(plots:GetChildren()) do
+			local ownerId = plot:GetAttribute("BeachHouseOwnerUserId")
+			if ownerId and ownerId == userId then
+				local houseType = plot:GetAttribute("BeachHouseType") or "BeachHouse"
+				table.insert(houses, tostring(houseType) .. " " .. plot.Name)
+			end
+		end
+	end
+	return houses
+end
+
+function CommandEngine:_extractWorkspaceVehicles(userId)
+	local names = {}
+	local seen = {}
+	local Workspace = game:GetService("Workspace")
+	local vehiclesFolder = Workspace:FindFirstChild("Vehicles")
+	if vehiclesFolder then
+		for _, v in ipairs(vehiclesFolder:GetChildren()) do
+			local ownerId = v:GetAttribute("OwnerUserId") or v:GetAttribute("VehicleOwnerUserId") or v:GetAttribute("DriverUserId")
+			if ownerId and ownerId == userId then
+				if not seen[v.Name] then
+					seen[v.Name] = true
+					table.insert(names, v.Name)
+				end
+			end
+		end
+	end
+	return names
+end
+
+function CommandEngine:_getServerPlayersCommand()
+	local Players = game:GetService("Players")
+	local localPlayer = Players.LocalPlayer
+	local localUserId = localPlayer and localPlayer.UserId
+	local localData = nil
+	if localPlayer then
+		localData = self:_getLocalPlayerDataViaRemote()
+	end
+
+	local result = {}
+	for _, player in ipairs(Players:GetPlayers()) do
+		if self:_isCancelled() then
+			return { success = false, error = "cancelled" }
+		end
+
+		local entry = {
+			roblox_name = player.Name,
+			display_name = player.DisplayName,
+			user_id = player.UserId,
+			team = player.Team and tostring(player.Team.Name) or "Neutral",
+		}
+
+		local isLocal = player == localPlayer
+		local balance = self:_getPlayerBalanceFromReplicatedStats(player)
+		local vehicles = {}
+		local beachHouses = self:_extractBeachHousesFromWorkspace(player.UserId)
+		local apartments = self:_extractApartmentIdsFromWorkspace(player.UserId)
+		local moneyPrinters = nil
+		local apartmentExpiresAt = nil
+
+		if isLocal and localData then
+			balance = localData.Currency and localData.Currency.Money or balance
+			vehicles = self:_extractVehicleNames(localData)
+			local dataBeachHouses = self:_extractBeachHousesFromData(localData)
+			for _, name in ipairs(dataBeachHouses) do
+				local found = false
+				for _, existing in ipairs(beachHouses) do
+					if existing == name then
+						found = true
+						break
+					end
+				end
+				if not found then
+					table.insert(beachHouses, name)
+				end
+			end
+			moneyPrinters = 0
+			if typeof(localData.MoneyPrinters) == "table" then
+				for _ in pairs(localData.MoneyPrinters) do
+					moneyPrinters += 1
+				end
+			end
+			apartmentExpiresAt = localData.ApartmentPurchaseExpiresAt
+		else
+			local wsVehicles = self:_extractWorkspaceVehicles(player.UserId)
+			for _, name in ipairs(wsVehicles) do
+				table.insert(vehicles, name)
+			end
+		end
+
+		entry.balance = balance
+		entry.properties = {
+			beach_houses = beachHouses,
+			apartments = apartments,
+		}
+		entry.vehicles = vehicles
+		if moneyPrinters ~= nil then
+			entry.money_printers = moneyPrinters
+		end
+		if apartmentExpiresAt ~= nil then
+			entry.apartment_expires_at = apartmentExpiresAt
+		end
+
+		table.insert(result, entry)
+	end
+
+	return { success = true, data = result }
+end
+
 function CommandEngine:execute(command)
 	local name = command.name
 	local payload = command.payload or {}
@@ -1528,6 +1761,8 @@ function CommandEngine:execute(command)
 		result = self:_getCustomFieldCommand(payload)
 	elseif name == "set_team" then
 		result = self:_setTeamCommand(payload)
+	elseif name == "get_server_players" then
+		result = self:_getServerPlayersCommand()
 	else
 		result = { success = false, error = "unknown command: " .. tostring(name) }
 	end

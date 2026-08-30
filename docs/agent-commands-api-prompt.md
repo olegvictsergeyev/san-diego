@@ -213,6 +213,10 @@ POST /commands/{id}/status
       "params": {
         "name": { "type": "string", "min": 1, "max": 6 }
       }
+    },
+    {
+      "name": "get_server_players",
+      "params": {}
     }
   ]
 }
