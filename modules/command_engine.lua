@@ -847,9 +847,10 @@ end
 
 function CommandEngine:_chasePlayer(player, options)
     options = options or {}
-    local timeout = tonumber(options.timeout) or 10
+    local timeout = tonumber(options.timeout) or 30
     local threshold = tonumber(options.threshold) or 5
     local heightThreshold = tonumber(options.heightThreshold) or 5
+    local maxStep = tonumber(options.maxStep) or 100
 
     local start = tick()
     while tick() - start < timeout do
@@ -877,7 +878,6 @@ function CommandEngine:_chasePlayer(player, options)
         end
 
         -- Двигаемся к цели короткими сегментами, чтобы успевать за убегающими и не тратить минуты на дальние дистанции.
-        local maxStep = 50
         local dx2d = tPos.X - lPos.X
         local dz2d = tPos.Z - lPos.Z
         local stepRatio = dist2d > 0 and math.min(1, maxStep / dist2d) or 0
@@ -905,7 +905,7 @@ function CommandEngine:_chasePlayer(player, options)
             end
         end
 
-        task.wait(0.05)
+        task.wait(0.03)
     end
 
     return { success = false, error = "chase timeout" }
