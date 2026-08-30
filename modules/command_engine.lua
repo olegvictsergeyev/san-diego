@@ -859,6 +859,65 @@ function CommandEngine:_moveTo(payload)
 	}
 end
 
+function CommandEngine:_chasePlayer(player, options)
+    options = options or {}
+    local timeout = tonumber(options.timeout) or 10
+    local threshold = tonumber(options.threshold) or 5
+    local heightThreshold = tonumber(options.heightThreshold) or 5
+
+    local start = tick()
+    while tick() - start < timeout do
+        if self:_isCancelled() then
+            return { success = false, error = "cancelled" }
+        end
+
+        local targetHrp = self:_getPlayerHrp(player)
+        if not targetHrp then
+            return { success = false, error = "target HumanoidRootPart not found" }
+        end
+
+        local localHrp = self:_getHrp()
+        if not localHrp then
+            return { success = false, error = "HumanoidRootPart not found" }
+        end
+
+        local tPos = targetHrp.Position
+        local lPos = localHrp.Position
+        local dist2d = math.sqrt((tPos.X - lPos.X) ^ 2 + (tPos.Z - lPos.Z) ^ 2)
+        local dy = math.abs(tPos.Y - lPos.Y)
+
+        if dist2d < threshold and dy < heightThreshold then
+            return { success = true, data = { distance = dist2d, heightDiff = dy } }
+        end
+
+        -- Двигаемся по горизонтали к актуальной позиции цели.
+        local moveResult = self:_moveTo({ x = math.round(tPos.X), z = math.round(tPos.Z), speed = 10 })
+        if not moveResult.success then
+            warn("[SanDiegoAgent][CommandEngine] chase horizontal move failed:", tostring(moveResult.error))
+            return { success = false, error = "chase horizontal move failed: " .. tostring(moveResult.error) }
+        end
+
+        -- Корректируем высоту (крыши, этажи).
+        local newHrp = self:_getHrp()
+        if newHrp then
+            local newY = newHrp.Position.Y
+            local targetY = tPos.Y
+            local dyNow = targetY - newY
+            if math.abs(dyNow) > 0.5 then
+                local yResult = self:_moveAxis("y", { value = math.round(dyNow), speed = 10 })
+                if not yResult.success then
+                    warn("[SanDiegoAgent][CommandEngine] chase vertical move failed:", tostring(yResult.error))
+                    return { success = false, error = "chase vertical move failed: " .. tostring(yResult.error) }
+                end
+            end
+        end
+
+        task.wait(0.05)
+    end
+
+    return { success = false, error = "chase timeout" }
+end
+
 function CommandEngine:_pause(payload)
 	local duration = payload and payload.duration
 	if typeof(duration) ~= "number" then
@@ -992,12 +1051,9 @@ function CommandEngine:_transferMoneyViaRespawn(payload)
 
 		-- Перед смертью подбегаем к цели, чтобы деньги упали рядом.
 		if moveToTarget then
-			local targetHrp = self:_getPlayerHrp(targetPlayer)
-			if targetHrp then
-				local moveResult = self:_moveTo({ x = math.round(targetHrp.Position.X), z = math.round(targetHrp.Position.Z), speed = 10 })
-				if not moveResult.success then
-					warn("[SanDiegoAgent][CommandEngine] failed to move to target before respawn:", tostring(moveResult.error))
-				end
+			local chaseResult = self:_chasePlayer(targetPlayer, { timeout = 10 })
+			if not chaseResult.success then
+				warn("[SanDiegoAgent][CommandEngine] failed to reach target before respawn:", tostring(chaseResult.error))
 			end
 		end
 
@@ -1143,12 +1199,9 @@ function CommandEngine:_respawnForMoney(payload)
 	end
 
 	if moveToTarget then
-		local targetHrp = self:_getPlayerHrp(targetPlayer)
-		if targetHrp then
-			local moveResult = self:_moveTo({ x = math.round(targetHrp.Position.X), z = math.round(targetHrp.Position.Z), speed = 10 })
-			if not moveResult.success then
-				warn("[SanDiegoAgent][CommandEngine] failed to move to target before respawn:", tostring(moveResult.error))
-			end
+		local chaseResult = self:_chasePlayer(targetPlayer, { timeout = 10 })
+		if not chaseResult.success then
+			warn("[SanDiegoAgent][CommandEngine] failed to reach target before respawn:", tostring(chaseResult.error))
 		end
 	end
 
