@@ -230,6 +230,40 @@ function CommandEngine:getCommandsSpec()
 			params = {},
 		},
 		{
+			name = "transfer_money_via_respawn",
+			description = "Передавать деньги целевому игроку через respawn, пока его баланс не достигнет заданной суммы",
+			params = {
+				identifier = {
+					type = "string",
+					required = true,
+					min = 1,
+					max = 64,
+					description = "Имя аккаунта, display name или user_id целевого игрока",
+				},
+				amount = {
+					type = "integer",
+					required = true,
+					min = 0,
+					max = 1000000000,
+					description = "Целевой баланс, которого нужно достичь",
+				},
+				max_attempts = {
+					type = "integer",
+					required = false,
+					min = 1,
+					max = 500,
+					description = "Максимальное число respawn'ов (по умолчанию 100)",
+				},
+				wait_seconds = {
+					type = "integer",
+					required = false,
+					min = 2,
+					max = 60,
+					description = "Секунд между проверками после respawn (по умолчанию 5)",
+				},
+			},
+		},
+		{
 			name = "jump",
 			description = "Подпрыгнуть",
 			params = {},
@@ -818,6 +852,131 @@ function CommandEngine:_respawn()
 	end
 
 	return { success = true, data = { respawned = true } }
+end
+
+function CommandEngine:_transferMoneyViaRespawn(payload)
+	local identifier = payload and payload.identifier
+	if identifier == nil or (typeof(identifier) ~= "string" and typeof(identifier) ~= "number") then
+		return { success = false, error = "param 'identifier' is required (string or number)" }
+	end
+
+	local amount = payload and payload.amount
+	if typeof(amount) ~= "number" or amount % 1 ~= 0 then
+		return { success = false, error = "param 'amount' must be an integer" }
+	end
+	if amount < 0 or amount > 1000000000 then
+		return { success = false, error = "param 'amount' out of range [0, 1000000000]" }
+	end
+
+	local maxAttempts = payload and payload.max_attempts
+	if maxAttempts == nil then
+		maxAttempts = 100
+	elseif typeof(maxAttempts) ~= "number" or maxAttempts % 1 ~= 0 then
+		return { success = false, error = "param 'max_attempts' must be an integer" }
+	else
+		maxAttempts = math.clamp(maxAttempts, 1, 500)
+	end
+
+	local waitSeconds = payload and payload.wait_seconds
+	if waitSeconds == nil then
+		waitSeconds = 5
+	elseif typeof(waitSeconds) ~= "number" or waitSeconds % 1 ~= 0 then
+		return { success = false, error = "param 'wait_seconds' must be an integer" }
+	else
+		waitSeconds = math.clamp(waitSeconds, 2, 60)
+	end
+
+	local targetPlayer, err = self:_resolvePlayer(identifier)
+	if not targetPlayer then
+		return { success = false, error = err or "target player not found" }
+	end
+
+	local player = self:_getPlayer()
+	if not player then
+		return { success = false, error = "LocalPlayer not found" }
+	end
+
+	local attempts = 0
+	local lastBalance = nil
+	while attempts < maxAttempts do
+		if self:_isCancelled() then
+			return { success = false, error = "cancelled" }
+		end
+
+		local balance = self:_getPlayerBalanceFromReplicatedStats(targetPlayer)
+		lastBalance = balance
+		if balance and balance >= amount then
+			return {
+				success = true,
+				data = {
+					target_user_id = targetPlayer.UserId,
+					target_name = targetPlayer.Name,
+					attempts = attempts,
+					final_balance = balance,
+					target_amount = amount,
+				},
+			}
+		end
+
+		-- Убиваем локального персонажа, чтобы он дропнул деньги.
+		local humanoid = self:_getHumanoid()
+		if humanoid and humanoid.Health > 0 then
+			if self:_isCancelled() then
+				return { success = false, error = "cancelled" }
+			end
+			humanoid.Health = 0
+		end
+
+		attempts += 1
+
+		-- Ждём возрождения и немного дополнительного времени.
+		local character = player.Character
+		local added = false
+		local conn
+		conn = player.CharacterAdded:Connect(function()
+			added = true
+			if conn then
+				conn:Disconnect()
+				conn = nil
+			end
+		end)
+
+		-- Таймаут на случай, если CharacterAdded не сработает.
+		task.delay(15, function()
+			if conn then
+				conn:Disconnect()
+				conn = nil
+			end
+		end)
+
+		local waited = 0
+		while not added and waited < 15 do
+			if self:_isCancelled() then
+				if conn then
+					conn:Disconnect()
+					conn = nil
+				end
+				return { success = false, error = "cancelled" }
+			end
+			task.wait(0.5)
+			waited += 0.5
+		end
+
+		-- Даём время игре обновить баланс цели.
+		task.wait(waitSeconds)
+	end
+
+	return {
+		success = false,
+		error = "max attempts reached",
+		data = {
+			target_user_id = targetPlayer.UserId,
+			target_name = targetPlayer.Name,
+			attempts = attempts,
+			final_balance = lastBalance,
+			target_amount = amount,
+		},
+	}
 end
 
 function CommandEngine:_jumpCommand()
@@ -1771,6 +1930,8 @@ function CommandEngine:execute(command)
 		result = self:_pause(payload)
 	elseif name == "respawn" then
 		result = self:_respawn()
+	elseif name == "transfer_money_via_respawn" then
+		result = self:_transferMoneyViaRespawn(payload)
 	elseif name == "jump" then
 		result = self:_jumpCommand()
 	elseif name == "hold_key" then

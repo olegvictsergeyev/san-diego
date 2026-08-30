@@ -211,6 +211,11 @@ function Agent:_getCommandTimeout(command)
 	if command.name == "join_private_server" then
 		return 60
 	end
+	if command.name == "transfer_money_via_respawn" then
+		local maxAttempts = tonumber(payload.max_attempts) or 100
+		local waitSeconds = tonumber(payload.wait_seconds) or 5
+		return math.clamp(maxAttempts * waitSeconds + 30, 30, 36000)
+	end
 	return 300
 end
 

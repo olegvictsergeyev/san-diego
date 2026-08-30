@@ -150,6 +150,15 @@ POST /commands/{id}/status
       "params": {}
     },
     {
+      "name": "transfer_money_via_respawn",
+      "params": {
+        "identifier": { "type": "string", "min": 1, "max": 64 },
+        "amount": { "type": "number", "min": 0, "max": 1000000000 },
+        "max_attempts": { "type": "number", "min": 1, "max": 500 },
+        "wait_seconds": { "type": "number", "min": 2, "max": 60 }
+      }
+    },
+    {
       "name": "jump",
       "params": {}
     },
