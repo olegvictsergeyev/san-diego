@@ -2278,6 +2278,18 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 	local finalBackpackCount = countPrintersInBackpack()
 	local finalRealCount = countRealPrintersFromIds(knownIds)
 
+	-- Перемещаем персонажа в центр площадки с принтерами после раскладки.
+	local centerX = (bounds.minX + bounds.maxX) / 2
+	local centerZ = (bounds.minZ + bounds.maxZ) / 2
+	local centerPos = Vector3.new(centerX, bounds.floorY + 3, centerZ)
+	local centerHrp = self:_getHrp()
+	if centerHrp then
+		pcall(function()
+			centerHrp.CFrame = CFrame.new(centerPos)
+			centerHrp.AssemblyLinearVelocity = Vector3.zero
+		end)
+	end
+
 	return {
 		success = true,
 		data = {
@@ -2298,6 +2310,11 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 				minX = bounds.minX, maxX = bounds.maxX,
 				minZ = bounds.minZ, maxZ = bounds.maxZ,
 				floorY = bounds.floorY,
+			},
+			center_position = {
+				x = math.round(centerPos.X * 10) / 10,
+				y = math.round(centerPos.Y * 10) / 10,
+				z = math.round(centerPos.Z * 10) / 10,
 			},
 			errors = results.errors,
 		},
