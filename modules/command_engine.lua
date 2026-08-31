@@ -1767,6 +1767,17 @@ local function generateSlotsInRegion(info, playerPos, maxCount)
 end
 
 local function placeToolInFolder(tool, folder, targetPos, orientationCF)
+	-- Remember existing real printers so we don't mistake them for a new conversion
+	local existingIds = {}
+	for _, c in ipairs(folder:GetChildren()) do
+		if c ~= tool and (c.Name:lower():find("print") or c:HasTag("MoneyPrinter")) then
+			local id = c:GetAttribute("MoneyPrinterId")
+			if id then
+				existingIds[id] = true
+			end
+		end
+	end
+
 	local ok, err = pcall(function()
 		tool.Parent = folder
 		local handle = tool:FindFirstChild("Handle")
@@ -1786,19 +1797,29 @@ local function placeToolInFolder(tool, folder, targetPos, orientationCF)
 	if not ok then
 		return false, tostring(err)
 	end
+
 	-- wait for server conversion
-	for i = 1, 30 do
+	local conversionId = nil
+	for i = 1, 45 do
 		task.wait(0.2)
 		if tool.Parent ~= folder then
-			-- could have been converted to a Model
-			return true
+			-- Tool was destroyed/replaced. Look for a new Model with MoneyPrinterId.
+			for _, c in ipairs(folder:GetChildren()) do
+				if c ~= tool and (c.Name:lower():find("print") or c:HasTag("MoneyPrinter")) then
+					local id = c:GetAttribute("MoneyPrinterId")
+					if id and not existingIds[id] then
+						return true
+					end
+				end
+			end
 		end
-		if tool:GetAttribute("MoneyPrinterId") then
+		if tool.Parent == folder and tool:GetAttribute("MoneyPrinterId") then
 			return true
 		end
 		for _, c in ipairs(folder:GetChildren()) do
 			if c ~= tool and (c.Name:lower():find("print") or c:HasTag("MoneyPrinter")) then
-				if c:GetAttribute("MoneyPrinterId") then
+				local id = c:GetAttribute("MoneyPrinterId")
+				if id and not existingIds[id] then
 					return true
 				end
 			end
