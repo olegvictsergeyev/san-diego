@@ -26,9 +26,10 @@ local TARGET_COLS = 12
 local TARGET_ROWS = 5
 local MAX_PRINTERS = 50
 
--- Side margins (in units of printer size). Final = size * multiplier.
-local ROW_SIDE_MARGIN_MULT = 1.0  -- отступ от торцевых стен (начало и конец ряда)
-local COL_SIDE_MARGIN_MULT = 0.5  -- отступ от длинных параллельных стен
+-- Side margins (multipliers of printer size). Final = size * multiplier.
+local ROW_START_MARGIN_MULT = 2.5  -- отступ от стены, с которой начинается выкладка (серьёзный)
+local ROW_END_MARGIN_MULT   = 0.5  -- отступ от противоположной торцевой стены
+local COL_SIDE_MARGIN_MULT  = 0.5  -- отступ от длинных параллельных стен
 
 local function log(...)
     local parts = {}
@@ -328,11 +329,10 @@ if backpackCount == 0 then
     return
 end
 
--- Use the smaller of measured footprint and tool size to allow tighter packing
-local toolSize = getToolSize()
-local size = existingFootprint and math.min(existingFootprint, toolSize) or toolSize
+-- Use tool size for spacing/margins (more accurate collision footprint than model extents)
+local size = toolSize
 local half = size / 2
-log("Final spacing size:", tostring(size))
+log("Final spacing size (tool):", tostring(size))
 
 -- ---------------------------------------------------------------------------
 -- Grid calculation
@@ -359,11 +359,12 @@ else
     log("Rows along X (length), cols along Z (width)")
 end
 
-local rowSideMargin = size * ROW_SIDE_MARGIN_MULT  -- отступ от торцов
-local colSideMargin = size * COL_SIDE_MARGIN_MULT  -- отступ от длинных стен
+local rowStartMargin = size * ROW_START_MARGIN_MULT
+local rowEndMargin   = size * ROW_END_MARGIN_MULT
+local colSideMargin  = size * COL_SIDE_MARGIN_MULT
 
-local startL = minL + rowSideMargin + half
-local endL   = maxL - rowSideMargin - half
+local startL = minL + rowStartMargin + half
+local endL   = maxL - rowEndMargin - half
 local rowSpacing = (endL - startL) / math.max(1, TARGET_COLS - 1)
 
 local startW = minW + colSideMargin + half
@@ -376,7 +377,7 @@ local maxCols = TARGET_COLS
 local capacity = maxCols * maxRows
 local totalToPlace = math.min(backpackCount, capacity, MAX_PRINTERS)
 
-log("Row side margin:", tostring(rowSideMargin), "Col side margin:", tostring(colSideMargin))
+log("Row start/end margins:", tostring(rowStartMargin), "/", tostring(rowEndMargin), "Col side margin:", tostring(colSideMargin))
 log("Row spacing:", tostring(rowSpacing), "Col spacing:", tostring(colSpacing))
 log("Max rows:", tostring(maxRows), "Max cols:", tostring(maxCols))
 log("Capacity:", tostring(capacity), "Will place:", tostring(totalToPlace))
