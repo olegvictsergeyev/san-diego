@@ -1537,17 +1537,16 @@ local function getPrinterPlacementInfo(folder)
 	local partSize = nil
 	local floorLocalY = nil
 	local regionCF, regionSize
+
+	-- Try to get region from an existing real printer (Model, not Tool)
 	for _, c in ipairs(folder:GetChildren()) do
-		if c.Name:lower():find("print") or c:HasTag("MoneyPrinter") then
+		local isPrinter = c.Name:lower():find("print") or c:HasTag("MoneyPrinter")
+		if isPrinter and not c:IsA("Tool") then
 			table.insert(existing, c)
 			local part = c:FindFirstChild("Printer_d") or c:FindFirstChild("Handle")
 			if part and part:IsA("BasePart") then
 				table.insert(positions, part.Position)
 				partSize = part.Size
-				if typeof(regionCF) == "CFrame" then
-					local lp = regionCF:PointToObjectSpace(part.Position)
-					floorLocalY = lp.Y
-				end
 			end
 			local rc = c:GetAttribute("MoneyPrinterApartmentRegionCFrame")
 			local rs = c:GetAttribute("MoneyPrinterApartmentRegionSize")
@@ -1561,7 +1560,17 @@ local function getPrinterPlacementInfo(folder)
 			end
 		end
 	end
-	-- Fallback: search folder ancestors for region attributes (empty apartment)
+
+	-- Fallback 1: BasePart named "Region" in the apartment unit (most reliable)
+	if typeof(regionCF) ~= "CFrame" and folder.Parent then
+		local regionPart = folder.Parent:FindFirstChild("Region")
+		if regionPart and regionPart:IsA("BasePart") then
+			regionCF = regionPart.CFrame
+			regionSize = regionPart.Size
+		end
+	end
+
+	-- Fallback 2: attributes on folder ancestors
 	if typeof(regionCF) ~= "CFrame" then
 		local p = folder.Parent
 		while p do
@@ -1575,7 +1584,8 @@ local function getPrinterPlacementInfo(folder)
 			p = p.Parent
 		end
 	end
-	-- Fallback 2: search descendants of folder parent (config parts, modules, etc.)
+
+	-- Fallback 3: search descendants of folder parent for attributes
 	if typeof(regionCF) ~= "CFrame" and folder.Parent then
 		local function scan(parent, depth)
 			if depth > 5 then return end
@@ -1594,13 +1604,44 @@ local function getPrinterPlacementInfo(folder)
 		end
 		scan(folder.Parent, 0)
 	end
-	-- If we have region but no floor height, estimate it from region lower bound and printer size
+
+	-- If we have region but no floor height, try to find a floor part in the unit
+	if typeof(regionCF) == "CFrame" and typeof(regionSize) == "Vector3" and not floorLocalY and folder.Parent then
+		local bestFloorY = nil
+		local bestArea = 0
+		local function scanFloor(parent, depth)
+			if depth > 3 then return end
+			for _, c in ipairs(parent:GetChildren()) do
+				if c ~= folder and c:IsA("BasePart") then
+					local size = c.Size
+					local area = size.X * size.Z
+					local bottomY = c.Position.Y - size.Y / 2
+					local lp = regionCF:PointToObjectSpace(Vector3.new(0, bottomY, 0))
+					-- Only consider parts near the bottom half of the region and with large top area
+					if lp.Y < 0 and area > bestArea then
+						bestArea = area
+						bestFloorY = lp.Y
+					end
+				end
+				scanFloor(c, depth + 1)
+			end
+		end
+		scanFloor(folder.Parent, 0)
+		if bestFloorY then
+			local s = partSize or Vector3.new(2, 0.5, 2)
+			local spacing = math.max(s.X, s.Z)
+			floorLocalY = bestFloorY + spacing * 0.5
+		end
+	end
+
+	-- Final fallback: estimate floor at lower bound + half spacing
 	if typeof(regionCF) == "CFrame" and typeof(regionSize) == "Vector3" and not floorLocalY then
-		local s = partSize or Vector3.new(4, 4, 4)
+		local s = partSize or Vector3.new(2, 0.5, 2)
 		local spacing = math.max(s.X, s.Z)
 		local halfY = regionSize.Y / 2
 		floorLocalY = -halfY + spacing * 0.5
 	end
+
 	local orientationCF
 	if typeof(regionCF) == "CFrame" then
 		orientationCF = regionCF - regionCF.Position
@@ -1856,6 +1897,14 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 	if folderDist > maxDistance then
 		return { success = false, error = "MoneyPrinters folder too far: " .. tostring(math.round(folderDist * 10) / 10) }
 	end
+
+	-- Move any leftover Tool fakes from the folder back to backpack so they don't block placement
+	for _, c in ipairs(folder:GetChildren()) do
+		if c:IsA("Tool") and c.Name:lower():find("print") then
+			pcall(function() c.Parent = backpack end)
+		end
+	end
+	task.wait(0.2)
 
 	local info = getPrinterPlacementInfo(folder)
 	if typeof(info.regionCF) ~= "CFrame" then
