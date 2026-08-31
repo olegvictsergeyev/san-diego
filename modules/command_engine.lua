@@ -313,7 +313,7 @@ function CommandEngine:getCommandsSpec()
 		},
 		{
 			name = "place_all_printers",
-			description = "Взять все Money Printer из инвентаря и расставить их сеткой в папке MoneyPrinters ближайшей квартиры. Персонаж должен стоять в верхнем левом углу комнаты и быть повернут лицом внутрь комнаты (вдоль направления первой строки сетки). Используется экипировка Tool и Tool:Activate() в позиции персонажа.",
+			description = "Убрать все уже стоящие Money Printer в квартире и разложить их заново плотной сеткой внутри измеренных границ комнаты (getgenv().RoomPerimeter). Вмещает до 50 принтеров. Если Tool'ов меньше 50 — выкладывает все. Требует предварительного замера комнаты через test/measure_room_perimeter_test.lua.",
 			params = {
 				max_total = {
 					type = "integer",
@@ -1871,6 +1871,9 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 		return { success = false, error = "Backpack not found" }
 	end
 
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local Workspace = game:GetService("Workspace")
+
 	local function countPrintersInBackpack()
 		local count = 0
 		for _, c in ipairs(backpack:GetChildren()) do
@@ -1890,28 +1893,66 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 		return nil
 	end
 
-	local function countPrintersInFolder(folder)
-		local count = 0
-		for _, c in ipairs(folder:GetChildren()) do
-			if c.Name:lower():find("print") or c:HasTag("MoneyPrinter") then
-				count += 1
+	local function getToolSize()
+		for _, c in ipairs(backpack:GetChildren()) do
+			if c:IsA("Tool") and c.Name:lower():find("print") then
+				local part = c:FindFirstChild("Printer_d") or c:FindFirstChild("Handle")
+				if part and part:IsA("BasePart") then
+					return math.max(part.Size.X, part.Size.Z)
+				end
 			end
 		end
-		return count
+		return 4
 	end
 
-	local startBackpackCount = countPrintersInBackpack()
-	if startBackpackCount == 0 then
-		return { success = false, error = "No Money Printer tools in backpack" }
+	local function getRealPrinterIds(folder)
+		local ids = {}
+		for _, c in ipairs(folder:GetChildren()) do
+			if c:IsA("Model") then
+				local id = c:GetAttribute("MoneyPrinterId")
+				if id then ids[id] = true end
+			end
+		end
+		return ids
+	end
+
+	local function countRealPrintersFromIds(ids)
+		local n = 0
+		for _ in pairs(ids) do n += 1 end
+		return n
+	end
+
+	local function findNearestMoneyPrintersFolder(pos)
+		local best, bestDist = nil, math.huge
+		local seen = {}
+		local function scan(parent, depth)
+			if depth > 8 then return end
+			for _, c in ipairs(parent:GetChildren()) do
+				if c.Name == "MoneyPrinters" and not seen[c] and
+				   (c:IsA("Folder") or c:IsA("Model") or c:IsA("Configuration")) then
+					seen[c] = true
+					local d = math.huge
+					for _, p in ipairs(c:GetChildren()) do
+						local part = p:FindFirstChild("Printer_d") or p:FindFirstChild("Handle") or p:FindFirstChildWhichIsA("BasePart")
+						if part and part:IsA("BasePart") then
+							d = math.min(d, (part.Position - pos).Magnitude)
+						end
+					end
+					if d < bestDist then bestDist = d; best = c end
+				end
+				if not c:IsA("BasePart") then scan(c, depth + 1) end
+			end
+		end
+		scan(Workspace, 0)
+		return best, bestDist
 	end
 
 	local hrp = self:_getHrp()
 	if not hrp then
 		return { success = false, error = "HumanoidRootPart not found" }
 	end
-	local playerPos = hrp.Position
 
-	local folder, folderDist = findNearestMoneyPrintersFolder(playerPos)
+	local folder, folderDist = findNearestMoneyPrintersFolder(hrp.Position)
 	if not folder then
 		return { success = false, error = "MoneyPrinters folder not found" }
 	end
@@ -1919,88 +1960,215 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 		return { success = false, error = "MoneyPrinters folder too far: " .. tostring(math.round(folderDist * 10) / 10) }
 	end
 
-	-- Move any leftover Tool fakes from the folder back to backpack so they don't block placement
+	-- Measured room bounds. Prefer getgenv().RoomPerimeter, else hardcoded fallback.
+	local bounds
+	if typeof(getgenv) == "function" then
+		local ok, gp = pcall(getgenv)
+		if ok and gp and gp.RoomPerimeter then
+			bounds = gp.RoomPerimeter
+		end
+	end
+	if not bounds then
+		bounds = {
+			minX = 997.1759033203125,
+			maxX = 1010.9700927734375,
+			minZ = -5993.724609375,
+			maxZ = -5977.5517578125,
+			floorY = -49.74806213378906,
+		}
+	end
+
+	local function getExistingModelFootprint()
+		for _, c in ipairs(folder:GetChildren()) do
+			if c:IsA("Model") and c:GetAttribute("MoneyPrinterId") then
+				local ok, ext = pcall(function() return c:GetExtentsSize() end)
+				if ok and ext then
+					return math.max(ext.X, ext.Z)
+				end
+			end
+		end
+		return nil
+	end
+
+	-- Collect all existing printers (remove old layout)
+	local pickupRemote = ReplicatedStorage:FindFirstChild("__remotes", true)
+	if pickupRemote then
+		pickupRemote = pickupRemote:FindFirstChild("MoneyPrinterService")
+		if pickupRemote then pickupRemote = pickupRemote:FindFirstChild("PickupMoneyPrinter") end
+	end
+
+	local function tryFirePrompt(obj)
+		if not obj then return false end
+		local prompt = obj:FindFirstChildOfClass("ProximityPrompt")
+		if prompt then
+			local ok = pcall(function() fireproximityprompt(prompt) end)
+			if ok then return true end
+		end
+		local clicker = obj:FindFirstChildOfClass("ClickDetector")
+		if clicker then
+			local ok = pcall(function() fireclickdetector(clicker) end)
+			if ok then return true end
+		end
+		return false
+	end
+
+	local function tryRemoteCollect(model)
+		if not pickupRemote then return false end
+		for _, args in ipairs({ { model }, { model, hrp.Position }, { folder, model }, {} }) do
+			local ok, res = pcall(function() return pickupRemote:InvokeServer(unpack(args)) end)
+			if ok then return true end
+		end
+		return false
+	end
+
+	local function collectPrinter(model)
+		local part = model:FindFirstChild("Printer_d") or model:FindFirstChild("Handle") or model:FindFirstChildWhichIsA("BasePart")
+		if part then
+			local h = self:_getHrp()
+			if h then
+				h.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0))
+			end
+			task.wait(0.2)
+		end
+		if tryRemoteCollect(model) then return true end
+		if tryFirePrompt(model) then return true end
+		for _, d in ipairs(model:GetDescendants()) do
+			if tryFirePrompt(d) then return true end
+		end
+		local ok = pcall(function() model.Parent = backpack end)
+		return ok
+	end
+
+	for attempt = 1, 3 do
+		local remaining = {}
+		for _, c in ipairs(folder:GetChildren()) do
+			if c.Name:lower():find("print") then
+				table.insert(remaining, c)
+			end
+		end
+		if #remaining == 0 then break end
+		for _, c in ipairs(remaining) do
+			if c.Parent == folder then
+				collectPrinter(c)
+				task.wait(0.2)
+			end
+		end
+		task.wait(0.5)
+	end
+
+	-- Delete leftover fakes
 	for _, c in ipairs(folder:GetChildren()) do
-		if c:IsA("Tool") and c.Name:lower():find("print") then
-			pcall(function() c.Parent = backpack end)
+		if c.Name:lower():find("print") and not c:GetAttribute("MoneyPrinterId") then
+			pcall(function() c:Destroy() end)
 		end
 	end
 	task.wait(0.2)
 
-	local info = getPrinterPlacementInfo(folder)
-	local partSize = info.partSize or Vector3.new(4, 4, 4)
-	local spacing = math.max(partSize.X, partSize.Z)
-
-	local startPos = hrp.Position
-	local startCF = hrp.CFrame
-	local rightDir = startCF.RightVector
-	local downDir = startCF.LookVector
-	rightDir = Vector3.new(rightDir.X, 0, rightDir.Z).Unit
-	downDir = Vector3.new(downDir.X, 0, downDir.Z).Unit
-	if rightDir.Magnitude < 0.001 or downDir.Magnitude < 0.001 then
-		rightDir = Vector3.new(1, 0, 0)
-		downDir = Vector3.new(0, 0, -1)
+	local startBackpackCount = countPrintersInBackpack()
+	if startBackpackCount == 0 then
+		return { success = false, error = "No Money Printer tools in backpack" }
 	end
 
-	local existingCount = #info.existing
-	local targetCount = math.min(existingCount + startBackpackCount, maxTotal)
-	local neededSlots = targetCount - existingCount
-	local maxCols = math.max(1, math.floor(math.sqrt(neededSlots * 2)))
+	local existingFootprint = getExistingModelFootprint()
+	local toolSize = getToolSize()
+	local size = existingFootprint and math.min(existingFootprint, toolSize) or toolSize
+	local half = size / 2
+
+	-- Grid calculation: fit up to maxTotal (default 50)
+	local widthX = bounds.maxX - bounds.minX
+	local widthZ = bounds.maxZ - bounds.minZ
+
+	local rowDir, colDir, lengthAxis, widthAxis
+	local minL, maxL, minW, maxW
+	if widthZ >= widthX then
+		rowDir = Vector3.new(0, 0, 1)
+		colDir = Vector3.new(1, 0, 0)
+		lengthAxis, widthAxis = "Z", "X"
+		minL, maxL = bounds.minZ, bounds.maxZ
+		minW, maxW = bounds.minX, bounds.maxX
+	else
+		rowDir = Vector3.new(1, 0, 0)
+		colDir = Vector3.new(0, 0, 1)
+		lengthAxis, widthAxis = "X", "Z"
+		minL, maxL = bounds.minX, bounds.maxX
+		minW, maxW = bounds.minZ, bounds.maxZ
+	end
+
+	local colSideMargin = half  -- 0.5 * size: margin on parallel walls
+	local endMargin = half      -- 0.5 * size: margin on far wall
+	local desiredStartMargin = size * 2.5
+	local minSpacing = size * 0.55 -- allow up to 45% overlap within a row
+
+	-- Compute how many columns fit with the desired start margin
+	local availableLength = maxL - minL - desiredStartMargin - endMargin - size
+	local targetCols = math.floor(availableLength / minSpacing) + 1
+	targetCols = math.max(5, math.min(12, targetCols))
+
+	local maxStartMargin = maxL - minL - endMargin - size - (targetCols - 1) * minSpacing
+	local rowStartMargin = math.min(desiredStartMargin, math.max(size, maxStartMargin))
+	local rowSpacing = (maxL - minL - rowStartMargin - endMargin - size) / math.max(1, targetCols - 1)
+
+	-- Compute rows
+	local availableWidth = maxW - minW - 2 * colSideMargin - size
+	local targetRows = math.max(1, math.floor(availableWidth / size) + 1)
+	targetRows = math.min(targetRows, math.ceil(maxTotal / targetCols))
+
+	local startL = minL + rowStartMargin + half
+	local startW = minW + colSideMargin + half
+	local colSpacing = size
+
+	local capacity = targetCols * targetRows
+	local totalToPlace = math.min(startBackpackCount, capacity, maxTotal)
+
+	local knownIds = getRealPrinterIds(folder)
+	local initialCount = countRealPrintersFromIds(knownIds)
 
 	local results = {
 		placed = 0,
 		failed = 0,
-		skippedNoPrinter = 0,
 		errors = {},
 	}
 
-	local function countRealPrintersInFolder()
-		local count = 0
-		for _, c in ipairs(folder:GetChildren()) do
-			if c:IsA("Model") and c:GetAttribute("MoneyPrinterId") then
-				count += 1
-			end
-		end
-		return count
-	end
-
-	local realNow = countRealPrintersInFolder()
-
-	for i = 1, neededSlots do
-		if self:_isCancelled() then
-			return { success = false, error = "cancelled" }
+	local function placeSlot(slotIndex, row, col)
+		local targetL = startL + (col - 1) * rowSpacing
+		local targetW = startW + (row - 1) * colSpacing
+		local targetPos
+		if lengthAxis == "Z" then
+			targetPos = Vector3.new(targetW, bounds.floorY, targetL)
+		else
+			targetPos = Vector3.new(targetL, bounds.floorY, targetW)
 		end
 
 		local tool = takePrinterFromBackpack()
 		if not tool then
-			results.skippedNoPrinter += 1
-			break
+			return false, "no more tools"
 		end
-
-		local col = (i - 1) % maxCols
-		local row = math.floor((i - 1) / maxCols)
-		local targetPos = startPos + rightDir * (col * spacing) + downDir * (row * spacing)
 
 		local ok, success, err = pcall(function()
 			local h = self:_getHrp()
 			if h then
 				h.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0))
 			end
-			task.wait(0.3)
+			task.wait(0.2)
 			local hum = self:_getHumanoid()
 			if hum then
 				pcall(function() hum:UnequipTools() end)
-				task.wait(0.2)
+				task.wait(0.1)
 				pcall(function() hum:EquipTool(tool) end)
-				task.wait(0.3)
+				task.wait(0.2)
 			end
 			pcall(function() tool:Activate() end)
-			for t = 1, 30 do
-				task.wait(0.2)
-				local newCount = countRealPrintersInFolder()
-				if newCount > realNow then
-					realNow = newCount
-					return true
+			for _ = 1, 20 do
+				task.wait(0.15)
+				for _, c in ipairs(folder:GetChildren()) do
+					if c:IsA("Model") then
+						local id = c:GetAttribute("MoneyPrinterId")
+						if id and not knownIds[id] then
+							knownIds[id] = true
+							task.wait(0.3)
+							return true
+						end
+					end
 				end
 			end
 			return false, "conversion timeout"
@@ -2008,21 +2176,45 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 
 		if ok and success == true then
 			results.placed += 1
+			return true
 		else
 			results.failed += 1
 			table.insert(results.errors, {
-				slot = i,
+				slot = slotIndex,
+				row = row,
+				col = col,
 				pos = { x = math.round(targetPos.X * 10) / 10, y = math.round(targetPos.Y * 10) / 10, z = math.round(targetPos.Z * 10) / 10 },
 				error = tostring((ok and err) or success or "unknown"),
 			})
-			pcall(function() tool.Parent = backpack end)
+			pcall(function()
+				if tool and tool.Parent then tool.Parent = backpack end
+			end)
+			return false, err
 		end
+	end
 
-		task.wait(0.1)
+	local slotIndex = 1
+	for row = 1, targetRows do
+		if slotIndex > totalToPlace then break end
+		local leftCol = 1
+		local rightCol = targetCols
+		local rowPlaced = 0
+		while leftCol <= rightCol and slotIndex <= totalToPlace do
+			if placeSlot(slotIndex, row, leftCol) then rowPlaced += 1 end
+			slotIndex += 1
+			task.wait(0.6)
+			if leftCol < rightCol and slotIndex <= totalToPlace then
+				if placeSlot(slotIndex, row, rightCol) then rowPlaced += 1 end
+				slotIndex += 1
+				task.wait(0.6)
+			end
+			leftCol += 1
+			rightCol -= 1
+		end
 	end
 
 	local finalBackpackCount = countPrintersInBackpack()
-	local finalFolderCount = countPrintersInFolder(folder)
+	local finalRealCount = countRealPrintersFromIds(knownIds)
 
 	return {
 		success = true,
@@ -2030,14 +2222,21 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 			folder = folder:GetFullName(),
 			folder_distance = math.round(folderDist * 10) / 10,
 			start_backpack = startBackpackCount,
-			start_folder = existingCount,
+			start_folder = initialCount,
 			placed = results.placed,
 			failed = results.failed,
-			skipped_no_printer = results.skippedNoPrinter,
 			remaining_backpack = finalBackpackCount,
-			final_total_in_folder = finalFolderCount,
-			target_total = targetCount,
-			spacing = math.round(spacing * 100) / 100,
+			final_real_printers = finalRealCount,
+			target_total = totalToPlace,
+			grid_cols = targetCols,
+			grid_rows = targetRows,
+			row_spacing = math.round(rowSpacing * 100) / 100,
+			col_spacing = math.round(colSpacing * 100) / 100,
+			bounds = {
+				minX = bounds.minX, maxX = bounds.maxX,
+				minZ = bounds.minZ, maxZ = bounds.maxZ,
+				floorY = bounds.floorY,
+			},
 			errors = results.errors,
 		},
 	}
