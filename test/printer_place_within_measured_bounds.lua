@@ -1,16 +1,16 @@
 --[[
-    San Diego Agent — Place printers inside measured room bounds v3
-    ==================================================================
+    San Diego Agent — Place printers inside measured room bounds v4 (snake / two-ended fill)
+    ============================================================================================
     - Собирает старые принтеры.
-    - Берёт getgenv().RoomPerimeter (или fallback).
-    - Измеряет реальный размер уже стоящего принтера (если есть), иначе берёт размер Tool'а.
-    - Ряды вдоль более длинной стороны.
-    - Отступы:
-        * от стены, откуда начинаются ряды (перпендикулярной) — MARGIN_ROW_START;
-        * от противоположной стены ряда — MARGIN_ROW_END (можно 0, чтобы ряды упирались);
-        * от параллельных стен — MARGIN_COL_START / MARGIN_COL_END (по умолчанию 0).
-    - Без наложения: сервер отклоняет пересечения.
-    - Контроль по MoneyPrinterId.
+    - Использует getgenv().RoomPerimeter (или fallback).
+    - Заполняет комнату "змейкой": в каждом ряду выкладывает принтеры с двух сторон к центру,
+      чтобы соседние выкладки не конфликтовали и ряд заполнялся полностью.
+    - Целевые параметры:
+        TARGET_COLS = 12  -- принтеров в ряду
+        TARGET_ROWS = 5   -- рядов
+        MAX_PRINTERS = 50 -- максимум всего
+    - Если принтеров меньше 50 -- выкладывает все.
+    - После каждого принтера и после каждого ряда выводит статистику.
 ]]
 
 local Players = game:GetService("Players")
@@ -21,13 +21,14 @@ local CollectionService = game:GetService("CollectionService")
 local player = Players.LocalPlayer
 local logs = {}
 
--- Margins per side (studs). MARGIN_ROW_START = -2.5 означает "авто = 2.5 * размер принтера".
-local MARGIN_ROW_START = -2.5 -- от стены, откуда начинаются ряды (перпендикулярной стене)
-local MARGIN_ROW_END   = 0.0  -- от противоположной стены рядам можно упираться
-local MARGIN_COL_START = 0.0  -- от параллельной стены (начало колонок)
-local MARGIN_COL_END   = 0.0  -- от противоположной параллельной стены
-local TARGET_COLS = 12        -- желаемое число принтеров в одном ряду (0 = авто по вместимости)
+-- Targets
+local TARGET_COLS = 12
+local TARGET_ROWS = 5
 local MAX_PRINTERS = 50
+
+-- Side margins (in units of printer size). Final = size * multiplier.
+local ROW_SIDE_MARGIN_MULT = 1.0  -- отступ от торцевых стен (начало и конец ряда)
+local COL_SIDE_MARGIN_MULT = 0.5  -- отступ от длинных параллельных стен
 
 local function log(...)
     local parts = {}
@@ -41,10 +42,10 @@ end
 local function copy()
     local text = table.concat(logs, "\n")
     if setclipboard then pcall(function() setclipboard(text) end) end
-    if writefile then pcall(function() writefile("printer_place_within_measured_bounds_v3_log.txt", text) end) end
+    if writefile then pcall(function() writefile("printer_place_snake_fill_log.txt", text) end) end
 end
 
-log("========== PLACE WITHIN MEASURED BOUNDS v3 ==========")
+log("========== PLACE PRINTERS SNAKE FILL ==========")
 log("Player:", player.Name)
 
 -- ---------------------------------------------------------------------------
@@ -197,7 +198,6 @@ end
 log("Bounds:")
 log("  X:", tostring(bounds.minX), "..", tostring(bounds.maxX))
 log("  Z:", tostring(bounds.minZ), "..", tostring(bounds.maxZ))
-log("  floorY:", tostring(bounds.floorY))
 
 -- ---------------------------------------------------------------------------
 -- Find folder
@@ -211,15 +211,12 @@ end
 log("Target folder:", folder:GetFullName())
 
 -- ---------------------------------------------------------------------------
--- Measure existing model footprint BEFORE collecting
+-- Measure footprint BEFORE collecting
 -- ---------------------------------------------------------------------------
 local existingFootprint = getExistingModelFootprint(folder)
-if existingFootprint then
-    log("Will use existing model footprint for spacing:", tostring(existingFootprint))
-end
 
 -- ---------------------------------------------------------------------------
--- Collect existing printers (robust)
+-- Collect existing printers
 -- ---------------------------------------------------------------------------
 local pickupRemote = ReplicatedStorage:FindFirstChild("__remotes", true)
 if pickupRemote then
@@ -252,7 +249,7 @@ local function tryRemoteCollect(model)
 end
 
 local function collectPrinter(model, backpack)
-    log("  Collecting:", model.Name, "Class:", model.ClassName)
+    log("  Collecting:", model.Name)
     if tryRemoteCollect(model) then
         log("    remote ok")
         return true
@@ -267,14 +264,12 @@ local function collectPrinter(model, backpack)
             return true
         end
     end
-    local ok, err = pcall(function() model.Parent = backpack end)
+    local ok = pcall(function() model.Parent = backpack end)
     if ok then
         log("    Parent=Backpack ok")
         return true
-    else
-        log("    Parent=Backpack failed:", tostring(err))
-        return false
     end
+    return false
 end
 
 local function collectAllPrinters()
@@ -294,7 +289,6 @@ local function collectAllPrinters()
         log("Collect attempt", tostring(attempt), "printers:", tostring(#remaining))
         for _, c in ipairs(remaining) do
             if c.Parent == folder then
-                -- Move character close to the printer so prompts/remotes definitely reach it
                 local part = c:FindFirstChild("Printer_d") or c:FindFirstChild("Handle") or c:FindFirstChildWhichIsA("BasePart")
                 if part then
                     local h = getHrp()
@@ -313,7 +307,7 @@ end
 
 collectAllPrinters()
 
--- Delete leftover fakes / uncollectable models
+-- Delete fakes
 local function clearFakes()
     local deleted = 0
     for _, c in ipairs(folder:GetChildren()) do
@@ -327,70 +321,68 @@ end
 clearFakes()
 
 local backpackCount = countBackpackPrinters()
-log("Backpack printers:", tostring(backpackCount))
+log("Backpack printers after collect:", tostring(backpackCount))
 if backpackCount == 0 then
     log("ERROR: No printers to place")
     copy()
     return
 end
 
-local size = existingFootprint or getToolSize()
+-- Use the smaller of measured footprint and tool size to allow tighter packing
+local toolSize = getToolSize()
+local size = existingFootprint and math.min(existingFootprint, toolSize) or toolSize
 local half = size / 2
-local rowStartMargin = (MARGIN_ROW_START < 0) and (size * math.abs(MARGIN_ROW_START)) or MARGIN_ROW_START
 log("Final spacing size:", tostring(size))
-log("Row start margin:", tostring(rowStartMargin))
 
 -- ---------------------------------------------------------------------------
--- Choose orientation: rows along longer side
+-- Grid calculation
 -- ---------------------------------------------------------------------------
 local widthX = bounds.maxX - bounds.minX
 local widthZ = bounds.maxZ - bounds.minZ
 
-local rowDir, colDir, startX, startZ, usableRow, usableCol
+-- Choose rows along longer side
+local rowDir, colDir, lengthAxis, widthAxis
+local minL, maxL, minW, maxW
 if widthZ >= widthX then
     rowDir = Vector3.new(0, 0, 1)
     colDir = Vector3.new(1, 0, 0)
-    startX = bounds.minX + MARGIN_COL_START + half
-    startZ = bounds.minZ + rowStartMargin + half
-    usableRow = widthZ - rowStartMargin - MARGIN_ROW_END - size
-    usableCol = widthX - MARGIN_COL_START - MARGIN_COL_END - size
-    log("Rows along Z (longer wall). Cols along X.")
+    lengthAxis, widthAxis = "Z", "X"
+    minL, maxL = bounds.minZ, bounds.maxZ
+    minW, maxW = bounds.minX, bounds.maxX
+    log("Rows along Z (length), cols along X (width)")
 else
     rowDir = Vector3.new(1, 0, 0)
     colDir = Vector3.new(0, 0, 1)
-    startX = bounds.minX + rowStartMargin + half
-    startZ = bounds.minZ + MARGIN_COL_START + half
-    usableRow = widthX - rowStartMargin - MARGIN_ROW_END - size
-    usableCol = widthZ - MARGIN_COL_START - MARGIN_COL_END - size
-    log("Rows along X (longer wall). Cols along Z.")
+    lengthAxis, widthAxis = "X", "Z"
+    minL, maxL = bounds.minX, bounds.maxX
+    minW, maxW = bounds.minZ, bounds.maxZ
+    log("Rows along X (length), cols along Z (width)")
 end
 
-local startPos = Vector3.new(startX, bounds.floorY, startZ)
+local rowSideMargin = size * ROW_SIDE_MARGIN_MULT  -- отступ от торцов
+local colSideMargin = size * COL_SIDE_MARGIN_MULT  -- отступ от длинных стен
 
--- Compute row spacing to fit exactly TARGET_COLS printers in the row
-local rowSpacing
-if TARGET_COLS and TARGET_COLS > 1 then
-    rowSpacing = math.max(0.1, usableRow / (TARGET_COLS - 1))
-    log("Target cols:", tostring(TARGET_COLS), "rowSpacing:", tostring(rowSpacing))
-else
-    rowSpacing = size
-end
+local startL = minL + rowSideMargin + half
+local endL   = maxL - rowSideMargin - half
+local rowSpacing = (endL - startL) / math.max(1, TARGET_COLS - 1)
+
+local startW = minW + colSideMargin + half
 local colSpacing = size
 
-local maxCols = math.max(1, TARGET_COLS and TARGET_COLS or math.floor(usableRow / size) + 1)
-local maxRows = math.max(1, math.floor(usableCol / colSpacing) + 1)
+local maxRows = math.max(1, math.floor((maxW - minW - 2 * colSideMargin - size) / colSpacing) + 1)
+local maxRows = math.min(maxRows, TARGET_ROWS)
+local maxCols = TARGET_COLS
+
 local capacity = maxCols * maxRows
 local totalToPlace = math.min(backpackCount, capacity, MAX_PRINTERS)
 
-log("Margins row start/end:", tostring(rowStartMargin), "/", tostring(MARGIN_ROW_END))
-log("Margins col start/end:", tostring(MARGIN_COL_START), "/", tostring(MARGIN_COL_END))
-log("Usable row length:", tostring(usableRow), "max cols:", tostring(maxCols))
-log("Usable col length:", tostring(usableCol), "max rows:", tostring(maxRows))
+log("Row side margin:", tostring(rowSideMargin), "Col side margin:", tostring(colSideMargin))
+log("Row spacing:", tostring(rowSpacing), "Col spacing:", tostring(colSpacing))
+log("Max rows:", tostring(maxRows), "Max cols:", tostring(maxCols))
 log("Capacity:", tostring(capacity), "Will place:", tostring(totalToPlace))
-log("Start pos:", tostring(startPos))
 
 -- ---------------------------------------------------------------------------
--- Placement with per-slot ID tracking
+-- Placement (snake: fill each row from both ends to center)
 -- ---------------------------------------------------------------------------
 local knownIds = getRealPrinterIds(folder)
 local initialCount = countRealPrintersFromIds(knownIds)
@@ -398,33 +390,26 @@ log("Initial real printers:", tostring(initialCount))
 
 local placed = 0
 local failed = 0
-local errors = {}
 
-for i = 1, totalToPlace do
-    log("\n--- Slot", tostring(i), "of", tostring(totalToPlace), "---")
+local function placeAt(slotIndex, row, col)
+    local targetL = startL + (col - 1) * rowSpacing
+    local targetW = startW + row * colSpacing
+
+    local targetPos
+    if lengthAxis == "Z" then
+        targetPos = Vector3.new(targetW, bounds.floorY, targetL)
+    else
+        targetPos = Vector3.new(targetL, bounds.floorY, targetW)
+    end
+
+    log("--- Slot", tostring(slotIndex), "of", tostring(totalToPlace), "(row", tostring(row + 1), "col", tostring(col), ")---")
+    log("Target pos:", tostring(targetPos))
 
     local tool = takePrinterTool()
     if not tool then
-        log("No more tools in backpack")
-        break
+        log("No more tools")
+        return false
     end
-
-    local col = (i - 1) % maxCols
-    local row = math.floor((i - 1) / maxCols)
-    local targetPos = startPos + rowDir * (col * rowSpacing) + colDir * (row * colSpacing)
-
-    -- Clamp strictly inside bounds with per-side margins
-    local minXCl = bounds.minX + MARGIN_COL_START + half
-    local maxXCl = bounds.maxX - MARGIN_COL_END - half
-    local minZCl = bounds.minZ + rowStartMargin + half
-    local maxZCl = bounds.maxZ - MARGIN_ROW_END - half
-    targetPos = Vector3.new(
-        math.clamp(targetPos.X, minXCl, maxXCl),
-        targetPos.Y,
-        math.clamp(targetPos.Z, minZCl, maxZCl)
-    )
-
-    log("Target pos:", tostring(targetPos))
 
     local slotOk, success, errMsg = pcall(function()
         local h = getHrp()
@@ -444,20 +429,14 @@ for i = 1, totalToPlace do
         -- Wait for a NEW MoneyPrinterId (3s timeout)
         for w = 1, 20 do
             task.wait(0.15)
-            local foundId = nil
             for _, c in ipairs(folder:GetChildren()) do
                 if c:IsA("Model") then
                     local id = c:GetAttribute("MoneyPrinterId")
                     if id and not knownIds[id] then
-                        foundId = id
-                        break
+                        knownIds[id] = true
+                        return true
                     end
                 end
-            end
-            if foundId then
-                knownIds[foundId] = true
-                task.wait(0.3) -- дать серверу финализировать модель
-                return true
             end
         end
         return false, "conversion timeout"
@@ -465,32 +444,56 @@ for i = 1, totalToPlace do
 
     if slotOk and success == true then
         placed += 1
-        log("OK. Confirmed real printers:", tostring(countRealPrintersFromIds(knownIds)))
+        log("OK. Placed", tostring(placed), "/", tostring(totalToPlace), "remaining", tostring(totalToPlace - placed))
+        return true
     else
         failed += 1
         local msg = tostring((slotOk and errMsg) or success or "unknown")
         log("FAILED:", msg)
-        table.insert(errors, { slot = i, pos = tostring(targetPos), error = msg })
         pcall(function()
             if tool and tool.Parent then tool.Parent = player.Backpack end
         end)
+        return false
     end
+end
 
-    task.wait(0.6) -- пауза между слотами, чтобы предыдущий принтер "устаканился"
+local slotIndex = 1
+for row = 0, maxRows - 1 do
+    local rowPlaced = 0
+    local leftCol = 1
+    local rightCol = maxCols
+    while leftCol <= rightCol and slotIndex <= totalToPlace do
+        -- Place on left side
+        if placeAt(slotIndex, row, leftCol) then
+            rowPlaced += 1
+        end
+        slotIndex += 1
+        task.wait(0.6)
+
+        -- Place on right side
+        if leftCol < rightCol and slotIndex <= totalToPlace then
+            if placeAt(slotIndex, row, rightCol) then
+                rowPlaced += 1
+            end
+            slotIndex += 1
+            task.wait(0.6)
+        end
+
+        leftCol += 1
+        rightCol -= 1
+    end
+    log("== Row", tostring(row + 1), "done. Placed in row:", tostring(rowPlaced),
+        "Total placed:", tostring(placed), "/", tostring(totalToPlace),
+        "Remaining:", tostring(math.max(0, totalToPlace - placed)), "==")
 end
 
 local finalCount = countRealPrintersFromIds(knownIds)
-log("\n--- RESULTS ---")
+log("\n--- FINAL RESULTS ---")
 log("Initial real printers:", tostring(initialCount))
-log("Placed (confirmed by new IDs):", tostring(placed))
+log("Target total:", tostring(totalToPlace))
+log("Placed (confirmed):", tostring(placed))
 log("Failed:", tostring(failed))
 log("Final real printers:", tostring(finalCount))
 log("Remaining backpack:", tostring(countBackpackPrinters()))
-if #errors > 0 then
-    log("Errors:", tostring(#errors))
-    for _, e in ipairs(errors) do
-        log("  slot", tostring(e.slot), "@", e.pos, "-", e.error)
-    end
-end
 log("========== END ==========")
 copy()
