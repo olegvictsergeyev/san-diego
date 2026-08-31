@@ -1922,7 +1922,52 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 		return n
 	end
 
-	local function findNearestMoneyPrintersFolder(pos)
+	local function findMoneyPrintersFolderInUnit(unit)
+		if not unit then return nil end
+		local function scan(parent, depth)
+			if depth > 8 then return nil end
+			for _, c in ipairs(parent:GetChildren()) do
+				if c.Name == "MoneyPrinters" and (c:IsA("Folder") or c:IsA("Model") or c:IsA("Configuration")) then
+					return c
+				end
+				if not c:IsA("BasePart") then
+					local found = scan(c, depth + 1)
+					if found then return found end
+				end
+			end
+			return nil
+		end
+		return scan(unit, 0)
+	end
+
+	local function findMoneyPrintersFolder(pos)
+		-- First: raycast down to find the unit we are standing in
+		local params
+		pcall(function()
+			local p = RaycastParams.new()
+			p.FilterType = Enum.RaycastFilterType.Blacklist
+			p.FilterDescendantsInstances = { character }
+			params = p
+		end)
+		local result
+		pcall(function()
+			result = Workspace:Raycast(pos + Vector3.new(0, 5, 0), Vector3.new(0, -50, 0), params)
+		end)
+		if result then
+			local unit = result.Instance
+			local depth = 0
+			while unit and depth < 10 do
+				local mp = findMoneyPrintersFolderInUnit(unit)
+				if mp then
+					local center = mp:IsA("Model") and mp:GetPivot().Position or mp.Position or pos
+					return mp, (center - pos).Magnitude
+				end
+				unit = unit.Parent
+				depth = depth + 1
+			end
+		end
+
+		-- Fallback: nearest folder by existing printer parts
 		local best, bestDist = nil, math.huge
 		local seen = {}
 		local function scan(parent, depth)
@@ -1944,7 +1989,15 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 			end
 		end
 		scan(Workspace, 0)
-		return best, bestDist
+		if best then return best, bestDist end
+
+		-- Last resort: any MoneyPrinters folder
+		for _, c in ipairs(Workspace:GetDescendants()) do
+			if c.Name == "MoneyPrinters" and (c:IsA("Folder") or c:IsA("Model") or c:IsA("Configuration")) then
+				return c, (c.Position and (c.Position - pos).Magnitude or 0)
+			end
+		end
+		return nil, math.huge
 	end
 
 	local hrp = self:_getHrp()
@@ -1952,7 +2005,7 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 		return { success = false, error = "HumanoidRootPart not found" }
 	end
 
-	local folder, folderDist = findNearestMoneyPrintersFolder(hrp.Position)
+	local folder, folderDist = findMoneyPrintersFolder(hrp.Position)
 	if not folder then
 		return { success = false, error = "MoneyPrinters folder not found" }
 	end
