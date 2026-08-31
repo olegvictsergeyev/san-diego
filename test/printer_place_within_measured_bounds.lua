@@ -21,11 +21,12 @@ local CollectionService = game:GetService("CollectionService")
 local player = Players.LocalPlayer
 local logs = {}
 
--- Margins per side (studs)
-local MARGIN_ROW_START = 1.5  -- от стены, откуда начинаются ряды (перпендикулярной стене)
+-- Margins per side (studs). MARGIN_ROW_START = -1 означает "авто = размер принтера".
+local MARGIN_ROW_START = -1   -- от стены, откуда начинаются ряды (перпендикулярной стене)
 local MARGIN_ROW_END   = 0.0  -- от противоположной стены рядам можно упираться
 local MARGIN_COL_START = 0.0  -- от параллельной стены (начало колонок)
 local MARGIN_COL_END   = 0.0  -- от противоположной параллельной стены
+local ROW_OVERLAP_RATIO = 0.25 -- наложение внутри ряда (0 = без, 0.25 = 25%)
 local MAX_PRINTERS = 50
 
 local function log(...)
@@ -335,7 +336,9 @@ end
 
 local size = existingFootprint or getToolSize()
 local half = size / 2
+local rowStartMargin = (MARGIN_ROW_START < 0) and size or MARGIN_ROW_START
 log("Final spacing size:", tostring(size))
+log("Row start margin:", tostring(rowStartMargin))
 
 -- ---------------------------------------------------------------------------
 -- Choose orientation: rows along longer side
@@ -348,22 +351,22 @@ if widthZ >= widthX then
     rowDir = Vector3.new(0, 0, 1)
     colDir = Vector3.new(1, 0, 0)
     startX = bounds.minX + MARGIN_COL_START + half
-    startZ = bounds.minZ + MARGIN_ROW_START + half
-    usableRow = widthZ - MARGIN_ROW_START - MARGIN_ROW_END - size
+    startZ = bounds.minZ + rowStartMargin + half
+    usableRow = widthZ - rowStartMargin - MARGIN_ROW_END - size
     usableCol = widthX - MARGIN_COL_START - MARGIN_COL_END - size
     log("Rows along Z (longer wall). Cols along X.")
 else
     rowDir = Vector3.new(1, 0, 0)
     colDir = Vector3.new(0, 0, 1)
-    startX = bounds.minX + MARGIN_ROW_START + half
+    startX = bounds.minX + rowStartMargin + half
     startZ = bounds.minZ + MARGIN_COL_START + half
-    usableRow = widthX - MARGIN_ROW_START - MARGIN_ROW_END - size
+    usableRow = widthX - rowStartMargin - MARGIN_ROW_END - size
     usableCol = widthZ - MARGIN_COL_START - MARGIN_COL_END - size
     log("Rows along X (longer wall). Cols along Z.")
 end
 
 local startPos = Vector3.new(startX, bounds.floorY, startZ)
-local rowSpacing = size      -- без наложения
+local rowSpacing = math.max(size * (1 - ROW_OVERLAP_RATIO), 0.1)
 local colSpacing = size
 
 local maxCols = math.max(1, math.floor(usableRow / rowSpacing) + 1)
@@ -371,7 +374,7 @@ local maxRows = math.max(1, math.floor(usableCol / colSpacing) + 1)
 local capacity = maxCols * maxRows
 local totalToPlace = math.min(backpackCount, capacity, MAX_PRINTERS)
 
-log("Margins row start/end:", tostring(MARGIN_ROW_START), "/", tostring(MARGIN_ROW_END))
+log("Margins row start/end:", tostring(rowStartMargin), "/", tostring(MARGIN_ROW_END))
 log("Margins col start/end:", tostring(MARGIN_COL_START), "/", tostring(MARGIN_COL_END))
 log("Usable row length:", tostring(usableRow), "max cols:", tostring(maxCols))
 log("Usable col length:", tostring(usableCol), "max rows:", tostring(maxRows))
@@ -405,7 +408,7 @@ for i = 1, totalToPlace do
     -- Clamp strictly inside bounds with per-side margins
     local minXCl = bounds.minX + MARGIN_COL_START + half
     local maxXCl = bounds.maxX - MARGIN_COL_END - half
-    local minZCl = bounds.minZ + MARGIN_ROW_START + half
+    local minZCl = bounds.minZ + rowStartMargin + half
     local maxZCl = bounds.maxZ - MARGIN_ROW_END - half
     targetPos = Vector3.new(
         math.clamp(targetPos.X, minXCl, maxXCl),
