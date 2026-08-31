@@ -1575,6 +1575,32 @@ local function getPrinterPlacementInfo(folder)
 			p = p.Parent
 		end
 	end
+	-- Fallback 2: search descendants of folder parent (config parts, modules, etc.)
+	if typeof(regionCF) ~= "CFrame" and folder.Parent then
+		local function scan(parent, depth)
+			if depth > 5 then return end
+			for _, c in ipairs(parent:GetChildren()) do
+				if c ~= folder then
+					local rc = c:GetAttribute("MoneyPrinterApartmentRegionCFrame")
+					local rs = c:GetAttribute("MoneyPrinterApartmentRegionSize")
+					if typeof(rc) == "CFrame" and typeof(rs) == "Vector3" then
+						regionCF = rc
+						regionSize = rs
+						return
+					end
+				end
+				scan(c, depth + 1)
+			end
+		end
+		scan(folder.Parent, 0)
+	end
+	-- If we have region but no floor height, estimate it from region lower bound and printer size
+	if typeof(regionCF) == "CFrame" and typeof(regionSize) == "Vector3" and not floorLocalY then
+		local s = partSize or Vector3.new(4, 4, 4)
+		local spacing = math.max(s.X, s.Z)
+		local halfY = regionSize.Y / 2
+		floorLocalY = -halfY + spacing * 0.5
+	end
 	local orientationCF
 	if typeof(regionCF) == "CFrame" then
 		orientationCF = regionCF - regionCF.Position
