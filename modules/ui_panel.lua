@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "1.15.12",
+    version = "1.17.1",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -173,6 +173,16 @@ local function stopAgent()
     getgenv().SanDiegoAgentRunning = nil
     getgenv().SanDiegoAgentRunningJobId = nil
     getgenv().StopSanDiegoAgent = false
+    pcall(function()
+        for _, root in ipairs({ game.CoreGui, Compat.gethui() }) do
+            if typeof(root) == "Instance" then
+                local marker = root:FindFirstChild("SanDiegoAgentRunningMarker")
+                if marker then
+                    marker:Destroy()
+                end
+            end
+        end
+    end)
 end
 
 local function getPosition()

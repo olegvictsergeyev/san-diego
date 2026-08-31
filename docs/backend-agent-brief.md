@@ -101,6 +101,8 @@ Long-poll. Query-параметры:
 - `respawn` — без параметров.
 - `transfer_money_via_respawn` — цикл: параметры `identifier`, `amount`, `max_attempts`, `wait_seconds`. Повторяет respawn, пока баланс цели не достигнет `amount`. Перед каждым respawn'ом агент преследует цель, чтобы деньги упали рядом.
 - `respawn_for_money` — одна итерация: параметры `identifier`, `amount`, `wait_seconds`. Проверяет баланс цели, преследует её, делает respawn, ждёт и возвращает `reached`, `before_balance`, `after_balance`, `respawned`.
+- `place_printer` — берёт один Money Printer из инвентаря и устанавливает в папку `MoneyPrinters` ближайшей квартиры. Опциональные параметры `x`, `y`, `z` задают позицию; если не переданы — используется позиция персонажа.
+- `place_all_printers` — берёт все Money Printer из инвентаря и расставляет сеткой в папке `MoneyPrinters` ближайшей квартиры, продолжая существующий порядок. Параметры `max_total` (1..50, по умолчанию 50) и `max_distance` (10..500, по умолчанию 200).
 - `jump` — без параметров, заставляет персонажа подпрыгнуть.
 - `hold_key` — параметры `key` (`string`, 1..32, имя клавиши из `Enum.KeyCode`, например `"E"`) и `duration` (`integer`, 0..60000, миллисекунды). Нажимает клавишу, удерживает указанное время, затем отпускает. `duration = 0` — нажать и сразу отпустить.
 - `join_private_server` — параметр `code` (string, 1..64).

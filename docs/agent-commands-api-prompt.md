@@ -167,6 +167,21 @@ POST /commands/{id}/status
       }
     },
     {
+      "name": "place_printer",
+      "params": {
+        "x": { "type": "number", "min": -7000, "max": 7000 },
+        "y": { "type": "number", "min": -7000, "max": 7000 },
+        "z": { "type": "number", "min": -7000, "max": 7000 }
+      }
+    },
+    {
+      "name": "place_all_printers",
+      "params": {
+        "max_total": { "type": "number", "min": 1, "max": 50 },
+        "max_distance": { "type": "number", "min": 10, "max": 500 }
+      }
+    },
+    {
       "name": "jump",
       "params": {}
     },

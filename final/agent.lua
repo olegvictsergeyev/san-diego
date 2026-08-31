@@ -11,13 +11,45 @@
 local currentJobId = tostring(game.JobId or "")
 print("[SanDiegoAgent] loader started, JobId:", currentJobId)
 
-if getgenv().SanDiegoAgentRunning and getgenv().SanDiegoAgentRunningJobId == currentJobId then
+-- Robust guard: prevent double start across different executor environments.
+local function findRunningMarker()
+    local function search(root)
+        if typeof(root) ~= "Instance" then return nil end
+        local marker = root:FindFirstChild("SanDiegoAgentRunningMarker")
+        if marker and marker:IsA("BoolValue") and marker.Value then
+            return marker
+        end
+        return nil
+    end
+    local marker = search(game:GetService("CoreGui"))
+    if marker then return marker end
+    local hui = (gethui and typeof(gethui) == "function") and gethui() or nil
+    if typeof(hui) == "Instance" then
+        return search(hui)
+    end
+    return nil
+end
+
+local existingMarker = findRunningMarker()
+
+if getgenv().SanDiegoAgentRunning and getgenv().SanDiegoAgentRunningJobId == currentJobId and existingMarker then
     print("[SanDiegoAgent] skipping start: already running on this server")
+    return
+end
+
+if existingMarker then
+    print("[SanDiegoAgent] skipping start: running marker found")
     return
 end
 
 getgenv().SanDiegoAgentRunning = true
 getgenv().SanDiegoAgentRunningJobId = currentJobId
+
+local marker = Instance.new("BoolValue")
+marker.Name = "SanDiegoAgentRunningMarker"
+marker.Value = true
+marker.Parent = (gethui and typeof(gethui) == "function" and typeof(gethui()) == "Instance") and gethui() or game:GetService("CoreGui")
+
 print("[SanDiegoAgent] guard passed, starting agent")
 
 local BASE_URL = getgenv().SanDiegoAgentBaseUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main"
@@ -45,4 +77,7 @@ if not ok then
     warn("[SanDiegoAgent] failed to start: " .. tostring(result))
     getgenv().SanDiegoAgentRunning = nil
     getgenv().SanDiegoAgentRunningJobId = nil
+    if marker then
+        pcall(function() marker:Destroy() end)
+    end
 end

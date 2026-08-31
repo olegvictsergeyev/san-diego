@@ -312,6 +312,26 @@ function CommandEngine:getCommandsSpec()
 			},
 		},
 		{
+			name = "place_all_printers",
+			description = "Взять все Money Printer из инвентаря и расставить их сеткой в папке MoneyPrinters ближайшей квартиры, продолжая существующий порядок",
+			params = {
+				max_total = {
+					type = "integer",
+					required = false,
+					min = 1,
+					max = 50,
+					description = "Максимальное суммарное число принтеров в квартире (по умолчанию 50)",
+				},
+				max_distance = {
+					type = "integer",
+					required = false,
+					min = 10,
+					max = 500,
+					description = "Максимальное расстояние до ближайшего существующего принтера в папке (по умолчанию 200)",
+				},
+			},
+		},
+		{
 			name = "jump",
 			description = "Подпрыгнуть",
 			params = {},
@@ -862,7 +882,13 @@ function CommandEngine:_chasePlayer(player, options)
             return false
         end
         local ok = pcall(function()
-            hrp.CFrame = targetHrp.CFrame * CFrame.new(0, 0, 2)
+            -- Не меняем высоту при близком телепорте, чтобы персонаж не оказался
+            -- в воздухе и не разбился при падении с крыши/возвышенности.
+            -- Выравниваем только по X/Z, высоту подбираем отдельно.
+            local currentY = hrp.Position.Y
+            local targetPos = targetHrp.Position
+            local _, yaw = hrp.CFrame:ToEulerAnglesYXZ()
+            hrp.CFrame = CFrame.new(Vector3.new(targetPos.X, currentY, targetPos.Z)) * CFrame.Angles(0, yaw, 0)
             hrp.AssemblyLinearVelocity = Vector3.zero
         end)
         return ok
@@ -889,31 +915,34 @@ function CommandEngine:_chasePlayer(player, options)
                 return { success = true, data = { distance = dist2d, heightDiff = dy } }
             end
 
-            -- Если уже близко — телепортируемся точно к цели.
+            -- Если уже близко — телепортируемся горизонтально к цели, сохраняя высоту.
             if dist2d < 25 and dy < 15 then
-                if tryTeleportToTarget(targetHrp) then
-                    return { success = true, data = { distance = 0, heightDiff = 0, method = "teleport" } }
+                if not tryTeleportToTarget(targetHrp) then
+                    warn("[SanDiegoAgent][CommandEngine] close teleport failed")
+                end
+            else
+                -- Двигаемся к цели короткими сегментами, чтобы успевать за убегающими и не тратить минуты на дальние дистанции.
+                local dx2d = tPos.X - lPos.X
+                local dz2d = tPos.Z - lPos.Z
+                local stepRatio = dist2d > 0 and math.min(1, maxStep / dist2d) or 0
+                local destX = math.round(lPos.X + dx2d * stepRatio)
+                local destZ = math.round(lPos.Z + dz2d * stepRatio)
+
+                local moveResult = self:_moveTo({ x = destX, z = destZ, speed = 10 })
+                if not moveResult.success then
+                    warn("[SanDiegoAgent][CommandEngine] chase horizontal move failed:", tostring(moveResult.error))
+                    return { success = false, error = "chase horizontal move failed: " .. tostring(moveResult.error) }
                 end
             end
 
-            -- Двигаемся к цели короткими сегментами, чтобы успевать за убегающими и не тратить минуты на дальние дистанции.
-            local dx2d = tPos.X - lPos.X
-            local dz2d = tPos.Z - lPos.Z
-            local stepRatio = dist2d > 0 and math.min(1, maxStep / dist2d) or 0
-            local destX = math.round(lPos.X + dx2d * stepRatio)
-            local destZ = math.round(lPos.Z + dz2d * stepRatio)
-
-            local moveResult = self:_moveTo({ x = destX, z = destZ, speed = 10 })
-            if not moveResult.success then
-                warn("[SanDiegoAgent][CommandEngine] chase horizontal move failed:", tostring(moveResult.error))
-                return { success = false, error = "chase horizontal move failed: " .. tostring(moveResult.error) }
-            end
-
             -- Корректируем высоту (крыши, этажи), но не более чем на maxStep за раз.
+            -- Используем актуальную позицию цели, так как она могла смениться.
             local newHrp = self:_getHrp()
-            if newHrp then
+            local newTargetHrp = self:_getPlayerHrp(player)
+            if newHrp and newTargetHrp then
                 local newY = newHrp.Position.Y
-                local dyNow = tPos.Y - newY
+                local targetY = newTargetHrp.Position.Y
+                local dyNow = targetY - newY
                 if math.abs(dyNow) > 0.5 then
                     local yValue = math.clamp(math.round(dyNow), -maxStep, maxStep)
                     local yResult = self:_moveAxis("y", { value = yValue, speed = 10 })
@@ -1054,7 +1083,7 @@ function CommandEngine:_transferMoneyViaRespawn(payload)
 		end
 
 		-- Перед смертью всегда подбегаем к цели, чтобы деньги упали рядом.
-		local chaseResult = self:_chasePlayer(targetPlayer, { timeout = 10 })
+		local chaseResult = self:_chasePlayer(targetPlayer, { timeout = 10, threshold = 1, heightThreshold = 1 })
 		if not chaseResult.success then
 			warn("[SanDiegoAgent][CommandEngine] failed to reach target before respawn:", tostring(chaseResult.error))
 		end
@@ -1192,7 +1221,7 @@ function CommandEngine:_respawnForMoney(payload)
 	end
 
 	-- Всегда подбегаем к цели перед смертью.
-	local chaseResult = self:_chasePlayer(targetPlayer, { timeout = 10 })
+	local chaseResult = self:_chasePlayer(targetPlayer, { timeout = 10, threshold = 1, heightThreshold = 1 })
 	if not chaseResult.success then
 		warn("[SanDiegoAgent][CommandEngine] failed to reach target before respawn:", tostring(chaseResult.error))
 	end
@@ -1266,6 +1295,610 @@ function CommandEngine:_respawnForMoney(payload)
 			before_balance = beforeBalance,
 			after_balance = afterBalance,
 			target_amount = amount,
+		},
+	}
+end
+
+function CommandEngine:_placePrinterCommand(payload)
+	local player = self:_getPlayer()
+	if not player then
+		return { success = false, error = "LocalPlayer not found" }
+	end
+
+	local character = self:_getCharacter()
+	if not character then
+		return { success = false, error = "Character not found" }
+	end
+
+	local humanoid = self:_getHumanoid()
+	if not humanoid then
+		return { success = false, error = "Humanoid not found" }
+	end
+
+	if self:_isCancelled() then
+		return { success = false, error = "cancelled" }
+	end
+
+	-- Ищем Tool-принтер в Backpack или Character.
+	local printer = nil
+	local backpack = player:FindFirstChild("Backpack")
+	if backpack then
+		for _, child in ipairs(backpack:GetChildren()) do
+			if child:IsA("Tool") and child.Name:lower():find("print") then
+				printer = child
+				break
+			end
+		end
+	end
+	if not printer then
+		for _, child in ipairs(character:GetChildren()) do
+			if child:IsA("Tool") and child.Name:lower():find("print") then
+				printer = child
+				break
+			end
+		end
+	end
+	if not printer then
+		return { success = false, error = "Money Printer not found in inventory" }
+	end
+
+	-- Определяем целевую позицию.
+	local hrp = self:_getHrp()
+	if not hrp then
+		return { success = false, error = "HumanoidRootPart not found" }
+	end
+
+	local pos = hrp.Position
+	if payload and typeof(payload.x) == "number" then
+		pos = Vector3.new(payload.x, pos.Y, pos.Z)
+	end
+	if payload and typeof(payload.y) == "number" then
+		pos = Vector3.new(pos.X, payload.y, pos.Z)
+	end
+	if payload and typeof(payload.z) == "number" then
+		pos = Vector3.new(pos.X, pos.Y, payload.z)
+	end
+
+	-- Ищем ближайшую папку MoneyPrinters, используя позиции уже стоящих принтеров.
+	local function findMoneyPrintersFolder()
+		local closest = nil
+		local closestDist = math.huge
+		local function scan(parent)
+			for _, c in ipairs(parent:GetChildren()) do
+				if c.Name == "MoneyPrinters" and (c:IsA("Folder") or c:IsA("Model")) then
+					local dist = math.huge
+					-- Сначала считаем расстояние до ближайшего существующего принтера.
+					for _, child in ipairs(c:GetChildren()) do
+						if child.Name:lower():find("print") then
+							local part = child:FindFirstChild("Printer_d") or child:FindFirstChild("Handle")
+							if part and part:IsA("BasePart") then
+								local d = (part.Position - pos).Magnitude
+								if d < dist then
+									dist = d
+								end
+							end
+						end
+					end
+					-- Если папка пустая — берём позицию любой BasePart в родителе.
+					if dist == math.huge then
+						local function findPart(p)
+							for _, cc in ipairs(p:GetChildren()) do
+								if cc:IsA("BasePart") then
+									return cc.Position
+								end
+								local f = findPart(cc)
+								if f then
+									return f
+								end
+							end
+							return nil
+						end
+						local pPos = findPart(c.Parent)
+						if pPos then
+							dist = (pPos - pos).Magnitude
+						end
+					end
+					if dist < closestDist then
+						closestDist = dist
+						closest = c
+					end
+				end
+				if not c:IsA("BasePart") then
+					scan(c)
+				end
+			end
+		end
+		scan(workspace)
+		return closest, closestDist
+	end
+
+	local folder, dist = findMoneyPrintersFolder()
+	if not folder then
+		return { success = false, error = "MoneyPrinters folder not found" }
+	end
+	if dist > 200 then
+		return { success = false, error = "MoneyPrinters folder too far: " .. tostring(math.round(dist * 10) / 10) }
+	end
+
+	-- Unequip текущий инструмент.
+	local currentTool = character:FindFirstChildOfClass("Tool")
+	if currentTool then
+		currentTool.Parent = backpack
+		task.wait(0.3)
+	end
+
+	-- Экипируем и сразу перемещаем в папку.
+	if self:_isCancelled() then
+		return { success = false, error = "cancelled" }
+	end
+
+	printer.Parent = character
+	task.wait(0.3)
+
+	if self:_isCancelled() then
+		return { success = false, error = "cancelled" }
+	end
+
+	local ok, err = pcall(function()
+		humanoid:UnequipTools()
+		task.wait(0.3)
+		printer.Parent = folder
+
+		local handle = printer:FindFirstChild("Handle")
+		local printerD = printer:FindFirstChild("Printer_d")
+		if handle and handle:IsA("BasePart") then
+			handle.CFrame = CFrame.new(pos)
+			handle.Anchored = true
+			handle.CanCollide = true
+		end
+		if printerD and printerD:IsA("BasePart") then
+			printerD.CFrame = CFrame.new(pos)
+			printerD.Anchored = true
+			printerD.CanCollide = true
+		end
+	end)
+
+	if not ok then
+		return { success = false, error = "failed to place printer: " .. tostring(err) }
+	end
+
+	task.wait(0.5)
+
+	return {
+		success = true,
+		data = {
+			printer_name = printer.Name,
+			folder = folder:GetFullName(),
+			position = {
+				x = math.round(pos.X * 10) / 10,
+				y = math.round(pos.Y * 10) / 10,
+				z = math.round(pos.Z * 10) / 10,
+			},
+			placed_path = printer.Parent and printer:GetFullName() or "destroyed",
+			distance_to_folder = math.round(dist * 10) / 10,
+		},
+	}
+end
+
+function CommandEngine:_placeAllPrintersCommand(payload)
+	local player = self:_getPlayer()
+	if not player then
+		return { success = false, error = "LocalPlayer not found" }
+	end
+
+	local character = self:_getCharacter()
+	if not character then
+		return { success = false, error = "Character not found" }
+	end
+
+	local humanoid = self:_getHumanoid()
+	if not humanoid then
+		return { success = false, error = "Humanoid not found" }
+	end
+
+	if self:_isCancelled() then
+		return { success = false, error = "cancelled" }
+	end
+
+	local maxTotal = payload and payload.max_total
+	if maxTotal == nil then
+		maxTotal = 50
+	elseif typeof(maxTotal) ~= "number" or maxTotal % 1 ~= 0 then
+		return { success = false, error = "param 'max_total' must be an integer" }
+	elseif maxTotal < 1 or maxTotal > 50 then
+		return { success = false, error = "param 'max_total' out of range [1, 50]" }
+	end
+
+	local maxDistance = payload and payload.max_distance
+	if maxDistance == nil then
+		maxDistance = 200
+	elseif typeof(maxDistance) ~= "number" or maxDistance % 1 ~= 0 then
+		return { success = false, error = "param 'max_distance' must be an integer" }
+	elseif maxDistance < 10 or maxDistance > 500 then
+		return { success = false, error = "param 'max_distance' out of range [10, 500]" }
+	end
+
+	local backpack = player:FindFirstChild("Backpack")
+	if not backpack then
+		return { success = false, error = "Backpack not found" }
+	end
+
+	-- Вспомогательные локальные функции.
+	local function unequipTools()
+		for _, c in ipairs(character:GetChildren()) do
+			if c:IsA("Tool") then
+				pcall(function() c.Parent = backpack end)
+			end
+		end
+		pcall(function() humanoid:UnequipTools() end)
+		task.wait(0.3)
+	end
+
+	local function resetInventory()
+		unequipTools()
+		-- Возвращаем в Backpack Tool'ы Money Printer, оказавшиеся в Workspace вне папок MoneyPrinters.
+		local function scan(parent)
+			for _, c in ipairs(parent:GetChildren()) do
+				if c:IsA("Tool") and c.Name:lower():find("print") then
+					local inMoneyPrinters = false
+					local p = c.Parent
+					while p do
+						if p.Name == "MoneyPrinters" then
+							inMoneyPrinters = true
+							break
+						end
+						p = p.Parent
+					end
+					if not inMoneyPrinters then
+						pcall(function() c.Parent = backpack end)
+					end
+				end
+				if not c:IsA("BasePart") then
+					scan(c)
+				end
+			end
+		end
+		scan(Workspace)
+		task.wait(0.2)
+	end
+
+	local function countPrintersInBackpack()
+		local count = 0
+		for _, c in ipairs(backpack:GetChildren()) do
+			if c:IsA("Tool") and c.Name:lower():find("print") then
+				count += 1
+			end
+		end
+		return count
+	end
+
+	local function takePrinterFromBackpack()
+		for _, c in ipairs(backpack:GetChildren()) do
+			if c:IsA("Tool") and c.Name:lower():find("print") then
+				return c
+			end
+		end
+		return nil
+	end
+
+	local function getExistingPrinterPositions(folder)
+		local positions = {}
+		for _, c in ipairs(folder:GetChildren()) do
+			if c.Name:lower():find("print") then
+				local part = c:FindFirstChild("Printer_d") or c:FindFirstChild("Handle")
+				if part and part:IsA("BasePart") then
+					table.insert(positions, part.Position)
+				end
+			end
+		end
+		return positions
+	end
+
+	local function chooseTargetFolder(playerPos)
+		local folders = {}
+		local function scan(parent)
+			for _, c in ipairs(parent:GetChildren()) do
+				if c.Name == "MoneyPrinters" and (c:IsA("Folder") or c:IsA("Model")) then
+					table.insert(folders, c)
+				end
+				if not c:IsA("BasePart") then
+					scan(c)
+				end
+			end
+		end
+		scan(workspace)
+		if #folders == 0 then return nil, nil end
+
+		local scored = {}
+		for _, folder in ipairs(folders) do
+			local existingPositions = getExistingPrinterPositions(folder)
+			local existingCount = #existingPositions
+			local dist = math.huge
+			for _, pos in ipairs(existingPositions) do
+				local d = (pos - playerPos).Magnitude
+				if d < dist then dist = d end
+			end
+			-- Для пустых папок — по центру квартиры.
+			if dist == math.huge then
+				local function findPart(p)
+					for _, cc in ipairs(p:GetChildren()) do
+						if cc:IsA("BasePart") then return cc.Position end
+						local f = findPart(cc)
+						if f then return f end
+					end
+					return nil
+				end
+				local pPos = findPart(folder.Parent)
+				if pPos then dist = (pPos - playerPos).Magnitude end
+			end
+			local score = dist - existingCount * 20
+			table.insert(scored, { folder = folder, dist = dist, existing = existingCount, score = score })
+		end
+		table.sort(scored, function(a, b) return a.score < b.score end)
+
+		local best = scored[1]
+		if best.dist > maxDistance then
+			return nil, best.dist
+		end
+		return best.folder, best.existing
+	end
+
+	local function analyzeGrid(positions)
+		if #positions == 0 then return nil end
+
+		local pts = {}
+		for _, p in ipairs(positions) do
+			table.insert(pts, { x = p.X, z = p.Z, y = p.Y })
+		end
+
+		local function clusterBy(tolerance, axis)
+			local clusters = {}
+			local sorted = {}
+			for _, p in ipairs(pts) do table.insert(sorted, p) end
+			table.sort(sorted, function(a, b) return a[axis] < b[axis] end)
+			for _, p in ipairs(sorted) do
+				local added = false
+				for _, c in ipairs(clusters) do
+					if math.abs(c.center - p[axis]) <= tolerance then
+						c.center = (c.center * #c.points + p[axis]) / (#c.points + 1)
+						table.insert(c.points, p)
+						added = true
+						break
+					end
+				end
+				if not added then
+					table.insert(clusters, { center = p[axis], points = { p } })
+				end
+			end
+			return clusters
+		end
+
+		local tolerance = 1.5
+		local clustersX = clusterBy(tolerance, "x")
+		local clustersZ = clusterBy(tolerance, "z")
+
+		local rowAxis, colAxis
+		if #clustersX >= #clustersZ then
+			rowAxis = "z"
+			colAxis = "x"
+		else
+			rowAxis = "x"
+			colAxis = "z"
+		end
+
+		local rows = clusterBy(tolerance, rowAxis)
+		table.sort(rows, function(a, b) return a.center < b.center end)
+		for _, row in ipairs(rows) do
+			table.sort(row.points, function(a, b) return a[colAxis] < b[colAxis] end)
+		end
+
+		local colDists = {}
+		for _, row in ipairs(rows) do
+			for i = 2, #row.points do
+				table.insert(colDists, math.abs(row.points[i][colAxis] - row.points[i - 1][colAxis]))
+			end
+		end
+		local colSpacing = nil
+		if #colDists > 0 then
+			table.sort(colDists)
+			colSpacing = colDists[math.floor(#colDists / 2) + 1]
+		end
+
+		local rowDists = {}
+		for i = 2, #rows do
+			table.insert(rowDists, math.abs(rows[i].center - rows[i - 1].center))
+		end
+		local rowSpacing = nil
+		if #rowDists > 0 then
+			table.sort(rowDists)
+			rowSpacing = rowDists[math.floor(#rowDists / 2) + 1]
+		end
+
+		if not colSpacing or colSpacing <= 0 then colSpacing = 4 end
+		if not rowSpacing or rowSpacing <= 0 then rowSpacing = 4 end
+
+		local sumY = 0
+		for _, p in ipairs(pts) do sumY += p.y end
+		local floorY = sumY / #pts
+
+		local dirRow = (rowAxis == "x") and Vector3.new(1, 0, 0) or Vector3.new(0, 0, 1)
+		local dirCol = (colAxis == "x") and Vector3.new(1, 0, 0) or Vector3.new(0, 0, 1)
+		local firstPoint = rows[1].points[1]
+		local origin = Vector3.new(firstPoint.x, floorY, firstPoint.z)
+
+		return {
+			rows = rows,
+			rowAxis = rowAxis,
+			colAxis = colAxis,
+			rowSpacing = rowSpacing,
+			colSpacing = colSpacing,
+			origin = origin,
+			dirRow = dirRow,
+			dirCol = dirCol,
+			printersPerRow = #rows[1].points,
+			rowCount = #rows,
+			existingCount = #positions,
+		}
+	end
+
+	local function generateNextSlots(grid, maxCount)
+		local slots = {}
+		local occupied = {}
+		local function key(pos)
+			return tostring(math.round(pos.X / 0.5)) .. "," .. tostring(math.round(pos.Z / 0.5))
+		end
+		for _, row in ipairs(grid.rows) do
+			for _, p in ipairs(row.points) do
+				occupied[key(Vector3.new(p.x, p.y, p.z))] = true
+			end
+		end
+
+		local placed = grid.existingCount
+		local rowIndex = 0
+		local colIndex = 0
+
+		while placed < maxCount do
+			local lastRow = grid.rows[#grid.rows]
+			local lastRowLen = #lastRow.points
+			if lastRowLen < grid.printersPerRow then
+				rowIndex = grid.rowCount - 1
+				colIndex = lastRowLen
+			else
+				rowIndex = grid.rowCount
+				colIndex = 0
+			end
+
+			local pos = grid.origin + grid.dirCol * (colIndex * grid.colSpacing) + grid.dirRow * (rowIndex * grid.rowSpacing)
+			local k = key(pos)
+			if occupied[k] then
+				colIndex += 1
+				if colIndex >= grid.printersPerRow then
+					rowIndex += 1
+					colIndex = 0
+				end
+				placed += 1
+			else
+				table.insert(slots, pos)
+				occupied[k] = true
+				placed += 1
+			end
+		end
+
+		return slots
+	end
+
+	local function placePrinterAt(tool, folder, position)
+		unequipTools()
+		local ok, err = pcall(function()
+			tool.Parent = character
+			task.wait(0.3)
+			pcall(function() humanoid:UnequipTools() end)
+			task.wait(0.3)
+			tool.Parent = folder
+			local handle = tool:FindFirstChild("Handle")
+			local printerD = tool:FindFirstChild("Printer_d")
+			if handle and handle:IsA("BasePart") then
+				handle.CFrame = CFrame.new(position)
+				handle.Anchored = true
+				handle.CanCollide = true
+			end
+			if printerD and printerD:IsA("BasePart") then
+				printerD.CFrame = CFrame.new(position)
+				printerD.Anchored = true
+				printerD.CanCollide = true
+			end
+		end)
+		if not ok then
+			return false, tostring(err)
+		end
+		task.wait(0.3)
+		return tool:IsDescendantOf(folder), "not in folder after place"
+	end
+
+	-- Начало выполнения.
+	resetInventory()
+
+	local startBackpackCount = countPrintersInBackpack()
+	if startBackpackCount == 0 then
+		return { success = false, error = "No Money Printer tools in backpack" }
+	end
+
+	local hrp = self:_getHrp()
+	if not hrp then
+		return { success = false, error = "HumanoidRootPart not found" }
+	end
+	local playerPos = hrp.Position
+
+	local folder, folderDist = chooseTargetFolder(playerPos)
+	if not folder then
+		return { success = false, error = "MoneyPrinters folder not found" }
+	end
+
+	local positions = getExistingPrinterPositions(folder)
+	local grid = analyzeGrid(positions)
+	if not grid then
+		return { success = false, error = "Could not analyze printer grid" }
+	end
+
+	local targetCount = math.min(grid.existingCount + startBackpackCount, maxTotal)
+	local slots = generateNextSlots(grid, targetCount)
+
+	local results = {
+		placed = 0,
+		failed = 0,
+		skippedNoPrinter = 0,
+		errors = {},
+	}
+
+	for i, pos in ipairs(slots) do
+		if self:_isCancelled() then
+			return { success = false, error = "cancelled" }
+		end
+
+		local tool = takePrinterFromBackpack()
+		if not tool then
+			results.skippedNoPrinter += 1
+			break
+		end
+
+		local ok, err = placePrinterAt(tool, folder, pos)
+		if ok then
+			results.placed += 1
+		else
+			results.failed += 1
+			table.insert(results.errors, { slot = i, pos = { x = pos.X, y = pos.Y, z = pos.Z }, error = tostring(err) })
+			pcall(function() tool.Parent = backpack end)
+		end
+
+		task.wait(0.3)
+	end
+
+	resetInventory()
+
+	local finalBackpackCount = countPrintersInBackpack()
+	local finalPositions = getExistingPrinterPositions(folder)
+
+	return {
+		success = true,
+		data = {
+			folder = folder:GetFullName(),
+			folder_distance = math.round(folderDist * 10) / 10,
+			start_backpack = startBackpackCount,
+			placed = results.placed,
+			failed = results.failed,
+			skipped_no_printer = results.skippedNoPrinter,
+			remaining_backpack = finalBackpackCount,
+			final_total_in_folder = #finalPositions,
+			target_total = targetCount,
+			grid = {
+				row_axis = grid.rowAxis,
+				col_axis = grid.colAxis,
+				row_spacing = math.round(grid.rowSpacing * 100) / 100,
+				col_spacing = math.round(grid.colSpacing * 100) / 100,
+				printers_per_row = grid.printersPerRow,
+				row_count = grid.rowCount,
+			},
+			errors = results.errors,
 		},
 	}
 end
@@ -2225,6 +2858,10 @@ function CommandEngine:execute(command)
 		result = self:_transferMoneyViaRespawn(payload)
 	elseif name == "respawn_for_money" then
 		result = self:_respawnForMoney(payload)
+	elseif name == "place_printer" then
+		result = self:_placePrinterCommand(payload)
+	elseif name == "place_all_printers" then
+		result = self:_placeAllPrintersCommand(payload)
 	elseif name == "jump" then
 		result = self:_jumpCommand()
 	elseif name == "hold_key" then
