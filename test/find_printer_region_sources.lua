@@ -74,15 +74,35 @@ local function scanAll(parent, depth)
         if c.Name == "MoneyPrinters" and not seen[c] then
             seen[c] = true
             log("  Folder:", c:GetFullName())
-            log("    Printer count:", tostring(#c:GetChildren()))
+            log("    Child count:", tostring(#c:GetChildren()))
             log("    Folder has region attrs:", tostring(dumpRegionAttrs(c)))
             log("    Parent:", c.Parent and c.Parent:GetFullName() or "nil")
             log("    Parent has region attrs:", tostring(dumpRegionAttrs(c.Parent)))
+            for _, child in ipairs(c:GetChildren()) do
+                log("    Child:", child.ClassName, child.Name)
+                log("      has MoneyPrinterId:", tostring(typeof(child:GetAttribute("MoneyPrinterId")) == "string"))
+                log("      has region attrs:", tostring(dumpRegionAttrs(child)))
+            end
         end
         scanAll(c, depth + 1)
     end
 end
 scanAll(Workspace, 0)
+
+-- Deep scan for any object with region attributes in Apartments
+log("\nDeep scan for MoneyPrinterApartmentRegionCFrame in Apartments:")
+if apartments then
+    local function deepScan(parent, depth)
+        if depth > 12 then return end
+        for _, c in ipairs(parent:GetChildren()) do
+            if dumpRegionAttrs(c) then
+                log("     object class:", c.ClassName)
+            end
+            deepScan(c, depth + 1)
+        end
+    end
+    deepScan(apartments, 0)
+end
 
 -- Print player current position and nearest MoneyPrinters folder
 local char = player.Character or player.CharacterAdded:Wait()
