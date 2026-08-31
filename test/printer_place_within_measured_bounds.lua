@@ -19,8 +19,8 @@ local CollectionService = game:GetService("CollectionService")
 local player = Players.LocalPlayer
 local logs = {}
 
-local ROW_OVERLAP_RATIO = 0.5 -- 50% наложение внутри ряда
-local WALL_MARGIN = 0.3       -- доп. отступ от стен, чтобы модель не вылезала
+local ROW_OVERLAP_RATIO = 0.0 -- без наложения: сервер отклоняет пересечения
+local WALL_MARGIN = 1.0       -- серьёзный отступ от стен, чтобы модель не вылезала
 local MAX_PRINTERS = 50
 
 local function log(...)
