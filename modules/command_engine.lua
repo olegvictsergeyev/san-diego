@@ -1959,7 +1959,11 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 			while unit and depth < 10 do
 				local mp = findMoneyPrintersFolderInUnit(unit)
 				if mp then
-					local center = mp:IsA("Model") and mp:GetPivot().Position or mp.Position or pos
+					local center = pos
+					if mp:IsA("Model") then
+						local ok, p = pcall(function() return mp:GetPivot().Position end)
+						if ok then center = p end
+					end
 					return mp, (center - pos).Magnitude
 				end
 				unit = unit.Parent
@@ -1994,7 +1998,12 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 		-- Last resort: any MoneyPrinters folder
 		for _, c in ipairs(Workspace:GetDescendants()) do
 			if c.Name == "MoneyPrinters" and (c:IsA("Folder") or c:IsA("Model") or c:IsA("Configuration")) then
-				return c, (c.Position and (c.Position - pos).Magnitude or 0)
+				local dist = 0
+				if c:IsA("Model") then
+					local ok, p = pcall(function() return c:GetPivot().Position end)
+					if ok then dist = (p - pos).Magnitude end
+				end
+				return c, dist
 			end
 		end
 		return nil, math.huge
