@@ -456,6 +456,7 @@ for i = 1, totalToPlace do
             end
             if foundId then
                 knownIds[foundId] = true
+                task.wait(0.3) -- дать серверу финализировать модель
                 return true
             end
         end
@@ -475,7 +476,7 @@ for i = 1, totalToPlace do
         end)
     end
 
-    task.wait(0.1)
+    task.wait(0.6) -- пауза между слотами, чтобы предыдущий принтер "устаканился"
 end
 
 local finalCount = countRealPrintersFromIds(knownIds)
