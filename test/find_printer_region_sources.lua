@@ -1,0 +1,95 @@
+--[[
+    San Diego Agent — Test: find MoneyPrinterApartmentRegion attribute sources
+    ===================================================================
+    Если в папке MoneyPrinters нет принтеров, атрибуты региона могут быть
+    на родителе или другом объекте. Этот тест ищет их в ветке Apartments.
+]]
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+
+local player = Players.LocalPlayer
+local logs = {}
+
+local function log(...)
+    local msg = "[" .. os.date("%H:%M:%S") .. "] " .. table.concat({ ... }, " ")
+    table.insert(logs, msg)
+    print(msg)
+    warn(msg)
+end
+
+local function copy()
+    local text = table.concat(logs, "\n")
+    if setclipboard then pcall(function() setclipboard(text) end) end
+    if writefile then pcall(function() writefile("find_printer_region_sources_log.txt", text) end) end
+end
+
+log("========== FIND PRINTER REGION SOURCES ==========")
+log("Player:", player.Name)
+
+local function dumpRegionAttrs(obj)
+    local rc = obj:GetAttribute("MoneyPrinterApartmentRegionCFrame")
+    local rs = obj:GetAttribute("MoneyPrinterApartmentRegionSize")
+    if typeof(rc) == "CFrame" and typeof(rs) == "Vector3" then
+        log("  -> found on", obj.ClassName, obj:GetFullName())
+        log("     CFrame:", tostring(rc))
+        log("     Size:", tostring(rs))
+        return true
+    end
+    return false
+end
+
+-- Scan Apartments branch
+log("\nScanning Workspace.Gameplay.Apartments...")
+local apartments = Workspace:FindFirstChild("Gameplay")
+apartments = apartments and apartments:FindFirstChild("Apartments")
+if apartments then
+    local function scan(parent, depth)
+        if depth > 10 then return end
+        for _, c in ipairs(parent:GetChildren()) do
+            if c.Name:lower():find("apartment") or c.Name:lower():find("unit") or c.Name:lower():find("region") then
+                if dumpRegionAttrs(c) then
+                    -- also print children names
+                    local names = {}
+                    for _, ch in ipairs(c:GetChildren()) do
+                        table.insert(names, ch.Name)
+                    end
+                    log("     children:", table.concat(names, ", "))
+                end
+            end
+            scan(c, depth + 1)
+        end
+    end
+    scan(apartments, 0)
+else
+    log("Workspace.Gameplay.Apartments not found")
+end
+
+-- List all MoneyPrinters folders and their parents/attributes
+log("\nAll MoneyPrinters folders:")
+local seen = {}
+local function scanAll(parent, depth)
+    if depth > 10 then return end
+    for _, c in ipairs(parent:GetChildren()) do
+        if c.Name == "MoneyPrinters" and not seen[c] then
+            seen[c] = true
+            log("  Folder:", c:GetFullName())
+            log("    Printer count:", tostring(#c:GetChildren()))
+            log("    Folder has region attrs:", tostring(dumpRegionAttrs(c)))
+            log("    Parent:", c.Parent and c.Parent:GetFullName() or "nil")
+            log("    Parent has region attrs:", tostring(dumpRegionAttrs(c.Parent)))
+        end
+        scanAll(c, depth + 1)
+    end
+end
+scanAll(Workspace, 0)
+
+-- Print player current position and nearest MoneyPrinters folder
+local char = player.Character or player.CharacterAdded:Wait()
+local hrp = char:FindFirstChild("HumanoidRootPart")
+if hrp then
+    log("\nPlayer position:", tostring(hrp.Position))
+end
+
+log("\n========== END ==========")
+copy()
