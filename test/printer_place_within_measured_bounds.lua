@@ -293,8 +293,17 @@ local function collectAllPrinters()
         log("Collect attempt", tostring(attempt), "printers:", tostring(#remaining))
         for _, c in ipairs(remaining) do
             if c.Parent == folder then
+                -- Move character close to the printer so prompts/remotes definitely reach it
+                local part = c:FindFirstChild("Printer_d") or c:FindFirstChild("Handle") or c:FindFirstChildWhichIsA("BasePart")
+                if part then
+                    local h = getHrp()
+                    if h then
+                        h.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0))
+                        task.wait(0.2)
+                    end
+                end
                 collectPrinter(c, backpack)
-                task.wait(0.3)
+                task.wait(0.2)
             end
         end
         task.wait(0.5)
@@ -411,19 +420,19 @@ for i = 1, totalToPlace do
         if h then
             h.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0))
         end
-        task.wait(0.3)
+        task.wait(0.2)
         local hum = getHumanoid()
         if hum then
             pcall(function() hum:UnequipTools() end)
-            task.wait(0.2)
+            task.wait(0.1)
             pcall(function() hum:EquipTool(tool) end)
-            task.wait(0.3)
+            task.wait(0.2)
         end
         pcall(function() tool:Activate() end)
 
-        -- Wait for a NEW MoneyPrinterId
-        for w = 1, 45 do
-            task.wait(0.2)
+        -- Wait for a NEW MoneyPrinterId (3s timeout)
+        for w = 1, 20 do
+            task.wait(0.15)
             local foundId = nil
             for _, c in ipairs(folder:GetChildren()) do
                 if c:IsA("Model") then
