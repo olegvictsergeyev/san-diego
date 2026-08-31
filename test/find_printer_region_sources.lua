@@ -110,8 +110,6 @@ local servicesToScan = {
     "Workspace",
     "ReplicatedStorage",
     "ReplicatedFirst",
-    "ServerScriptService",
-    "ServerStorage",
     "Lighting",
     "StarterGui",
     "StarterPack",
@@ -131,10 +129,12 @@ for _, serviceName in ipairs(servicesToScan) do
                 deepScan(c, depth + 1)
             end
         end
-        deepScan(service, 0)
+        pcall(function() deepScan(service, 0) end)
         if not foundAny then
             log("  Service", serviceName, ": none")
         end
+    else
+        log("  Service", serviceName, ": not accessible")
     end
 end
 
@@ -155,6 +155,39 @@ if backpack then
     end
 else
     log("  No backpack")
+end
+
+-- Inspect apartment unit children
+log("\nInspecting apartment unit children:")
+local moneyPrintersFolder = nil
+for _, c in ipairs(seen) do moneyPrintersFolder = c break end
+if not moneyPrintersFolder then
+    local function findFolder(parent, depth)
+        if depth > 8 then return nil end
+        for _, c in ipairs(parent:GetChildren()) do
+            if c.Name == "MoneyPrinters" then return c end
+            local f = findFolder(c, depth + 1)
+            if f then return f end
+        end
+        return nil
+    end
+    moneyPrintersFolder = findFolder(Workspace, 0)
+end
+if moneyPrintersFolder and moneyPrintersFolder.Parent then
+    local unit = moneyPrintersFolder.Parent
+    log("  Unit:", unit:GetFullName())
+    for _, c in ipairs(unit:GetChildren()) do
+        if c == moneyPrintersFolder then continue end
+        if c:IsA("BasePart") then
+            log("    BasePart:", c.Name, "Size:", tostring(c.Size), "Pos:", tostring(c.Position))
+        elseif c:IsA("Model") or c:IsA("Folder") or c:IsA("Configuration") then
+            log("    Container:", c.ClassName, c.Name, "children:", tostring(#c:GetChildren()))
+        else
+            log("    Other:", c.ClassName, c.Name)
+        end
+    end
+else
+    log("  No MoneyPrinters folder found")
 end
 
 -- Print player current position and nearest MoneyPrinters folder
