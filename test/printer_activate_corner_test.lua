@@ -3,8 +3,10 @@
     ==============================================================================
     1. Удаляет фейковые принтеры из папки MoneyPrinters (всё без MoneyPrinterId).
     2. Берёт размер Tool'а из backpack.
-    3. Ставит принтеры с верхнего левого угла комнаты, впритык друг к другу.
-    4. Работает даже если в комнате изначально нет принтеров.
+    3. Находит реальные границы пола в unit'е (чтобы не попасть в стену).
+    4. Ставит принтеры с верхнего левого угла комнаты, впритык друг к другу,
+       с отступом в один принтер от стен.
+    5. Работает даже если в комнате изначально нет принтеров.
 ]]
 
 local Players = game:GetService("Players")
@@ -73,6 +75,42 @@ local function getRegionInfo(folder)
     return nil, nil
 end
 
+local function computeFloorBounds(unit)
+    local minX, minZ = math.huge, math.huge
+    local maxX, maxZ = -math.huge, -math.huge
+    local floorY = nil
+    local up = Vector3.new(0, 1, 0)
+    local function scan(parent, depth)
+        if depth > 5 then return end
+        for _, c in ipairs(parent:GetChildren()) do
+            if c:IsA("BasePart") then
+                local size = c.Size
+                local cf = c.CFrame
+                local dot = math.abs(cf.UpVector:Dot(up))
+                if dot > 0.9 and size.Y <= 2 then
+                    local hx = size.X / 2
+                    local hz = size.Z / 2
+                    local pMinX = cf.Position.X - hx
+                    local pMaxX = cf.Position.X + hx
+                    local pMinZ = cf.Position.Z - hz
+                    local pMaxZ = cf.Position.Z + hz
+                    if pMinX < minX then minX = pMinX end
+                    if pMaxX > maxX then maxX = pMaxX end
+                    if pMinZ < minZ then minZ = pMinZ end
+                    if pMaxZ > maxZ then maxZ = pMaxZ end
+                    if not floorY or c.Position.Y - size.Y / 2 < floorY then
+                        floorY = c.Position.Y - size.Y / 2
+                    end
+                end
+            end
+            scan(c, depth + 1)
+        end
+    end
+    scan(unit, 0)
+    if minX == math.huge then return nil, nil, nil end
+    return Vector3.new(minX, floorY, minZ), Vector3.new(maxX, floorY, maxZ)
+end
+
 log("========== PRINTER ACTIVATE CORNER TEST ==========")
 log("Player:", player.Name)
 
@@ -84,14 +122,13 @@ if not folder then
 end
 log("Folder:", folder:GetFullName())
 
-local regionCF, regionSize = getRegionInfo(folder)
-if not regionCF then
-    log("ERROR: No Region part")
+local unit = folder.Parent
+if not unit then
+    log("ERROR: No unit parent")
     copy()
     return
 end
-log("Region CF:", tostring(regionCF))
-log("Region Size:", tostring(regionSize))
+log("Unit:", unit:GetFullName())
 
 -- Delete fake printers
 log("Deleting fake printers from folder...")
@@ -108,7 +145,6 @@ for _, c in ipairs(toDelete) do
     pcall(function() c:Destroy() end)
 end
 log("Deleted:", tostring(#toDelete))
-
 task.wait(0.3)
 
 -- Get tool size from backpack
@@ -141,31 +177,41 @@ local spacing = math.max(partSize.X, partSize.Z)
 log("Tool part size:", tostring(partSize))
 log("Spacing:", tostring(spacing))
 
--- Floor height: region bottom + half spacing
-local half = regionSize / 2
-local floorLocalY = -half.Y + spacing / 2
-log("Floor local Y:", tostring(floorLocalY))
+-- Compute floor bounds
+local floorMin, floorMax = computeFloorBounds(unit)
+if not floorMin then
+    log("ERROR: Could not compute floor bounds")
+    copy()
+    return
+end
+log("Floor min:", tostring(floorMin))
+log("Floor max:", tostring(floorMax))
 
--- Top-left corner: local (-half.X + margin, floorLocalY, half.Z - margin)
+-- Floor Y for placement: floor top + half printer height
+local floorY = floorMin.Y + spacing / 2
+log("Floor Y:", tostring(floorY))
+
+-- Top-left: min X, max Z. Margin = one printer.
 local margin = spacing
-local startLocal = Vector3.new(-half.X + margin, floorLocalY, half.Z - margin)
-log("Margin (one printer):", tostring(margin))
-log("Start local (top-left):", tostring(startLocal))
+local startX = floorMin.X + margin
+local startZ = floorMax.Z - margin
+log("Start top-left:", tostring(startX), tostring(startZ))
 
--- Generate 3 positions: fill row along +X, next row -Z
-local positions = {}
-local maxCols = math.floor((regionSize.X - 2 * margin) / spacing)
-local maxRows = math.floor((regionSize.Z - 2 * margin) / spacing)
+local availableX = (floorMax.X - floorMin.X) - 2 * margin
+local availableZ = (floorMax.Z - floorMin.Z) - 2 * margin
+local maxCols = math.max(1, math.floor(availableX / spacing))
+local maxRows = math.max(1, math.floor(availableZ / spacing))
+log("Available X:", tostring(availableX), "Z:", tostring(availableZ))
 log("Max cols:", tostring(maxCols), "max rows:", tostring(maxRows))
 
+local positions = {}
 for i = 1, 3 do
     local row = math.floor((i - 1) / maxCols)
     local col = (i - 1) % maxCols
-    local lx = startLocal.X + col * spacing
-    local lz = startLocal.Z - row * spacing
-    local worldPos = regionCF:PointToWorldSpace(Vector3.new(lx, floorLocalY, lz))
-    table.insert(positions, worldPos)
-    log("Slot " .. tostring(i) .. ":", tostring(worldPos))
+    local x = startX + col * spacing
+    local z = startZ - row * spacing
+    table.insert(positions, Vector3.new(x, floorY, z))
+    log("Slot " .. tostring(i) .. ":", tostring(positions[#positions]))
 end
 
 local char = player.Character or player.CharacterAdded:Wait()
@@ -205,7 +251,6 @@ for i, pos in ipairs(positions) do
         break
     end
 
-    -- Teleport above position
     log("Moving character...")
     pcall(function()
         hrp.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
