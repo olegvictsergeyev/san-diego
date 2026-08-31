@@ -78,6 +78,13 @@ end
 local marker = markerErr
 
 local function getBaseUrl()
+    -- Priority 1: argument passed directly via loadstring(...)(baseUrl)
+    local args = {...}
+    if #args > 0 and typeof(args[1]) == "string" then
+        log("INFO", "using base URL passed as loadstring argument")
+        return args[1]
+    end
+    -- Priority 2: getgenv()
     if typeof(getgenv) == "function" then
         local ok, genv = pcall(getgenv)
         if ok and genv and typeof(genv.SanDiegoAgentBaseUrl) == "string" then
@@ -85,10 +92,12 @@ local function getBaseUrl()
             return genv.SanDiegoAgentBaseUrl
         end
     end
+    -- Priority 3: _G
     if typeof(_G) == "table" and typeof(_G.SanDiegoAgentBaseUrl) == "string" then
         log("INFO", "using _G.SanDiegoAgentBaseUrl")
         return _G.SanDiegoAgentBaseUrl
     end
+    -- Priority 4: shared
     if typeof(shared) == "table" and typeof(shared.SanDiegoAgentBaseUrl) == "string" then
         log("INFO", "using shared.SanDiegoAgentBaseUrl")
         return shared.SanDiegoAgentBaseUrl
