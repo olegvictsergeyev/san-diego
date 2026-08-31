@@ -1628,16 +1628,7 @@ local function generateSlotsInRegion(info, maxCount)
 		occupied[key(lp.X, lp.Z)] = true
 	end
 
-	local originLocal
-	if #existingLocals > 0 then
-		local sum = Vector3.new(0, 0, 0)
-		for _, lp in ipairs(existingLocals) do
-			sum = sum + lp
-		end
-		originLocal = sum / #existingLocals
-	else
-		originLocal = Vector3.new(0, info.floorLocalY, 0)
-	end
+	local originLocal = Vector3.new(0, info.floorLocalY, 0)
 
 	local candidates = {}
 	local maxOffset = math.max(
@@ -1657,6 +1648,7 @@ local function generateSlotsInRegion(info, maxCount)
 				local d = math.sqrt((lp.X - lx) ^ 2 + (lp.Z - lz) ^ 2)
 				if d < nearestDist then nearestDist = d end
 			end
+			if nearestDist < spacing * 0.8 then continue end
 			table.insert(candidates, { pos = worldPos, localPos = Vector3.new(lx, info.floorLocalY, lz), dist = nearestDist })
 		end
 	end
