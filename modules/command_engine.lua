@@ -313,7 +313,7 @@ function CommandEngine:getCommandsSpec()
 		},
 		{
 			name = "place_all_printers",
-			description = "Взять все Money Printer из инвентаря и расставить их сеткой в папке MoneyPrinters ближайшей квартиры, продолжая существующий порядок",
+			description = "Взять все Money Printer из инвентаря и расставить их сеткой в папке MoneyPrinters ближайшей квартиры. Персонаж должен стоять в верхнем левом углу комнаты и быть повернут лицом внутрь комнаты (вдоль направления первой строки сетки). Используется экипировка Tool и Tool:Activate() в позиции персонажа.",
 			params = {
 				max_total = {
 					type = "integer",
@@ -1928,17 +1928,24 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 	task.wait(0.2)
 
 	local info = getPrinterPlacementInfo(folder)
-	if typeof(info.regionCF) ~= "CFrame" then
-		return { success = false, error = "No MoneyPrinterApartmentRegion attributes found" }
+	local partSize = info.partSize or Vector3.new(4, 4, 4)
+	local spacing = math.max(partSize.X, partSize.Z)
+
+	local startPos = hrp.Position
+	local startCF = hrp.CFrame
+	local rightDir = startCF.RightVector
+	local downDir = startCF.LookVector
+	rightDir = Vector3.new(rightDir.X, 0, rightDir.Z).Unit
+	downDir = Vector3.new(downDir.X, 0, downDir.Z).Unit
+	if rightDir.Magnitude < 0.001 or downDir.Magnitude < 0.001 then
+		rightDir = Vector3.new(1, 0, 0)
+		downDir = Vector3.new(0, 0, -1)
 	end
 
 	local existingCount = #info.existing
 	local targetCount = math.min(existingCount + startBackpackCount, maxTotal)
 	local neededSlots = targetCount - existingCount
-	local slots, err, spacing = generateSlotsInRegion(info, playerPos, neededSlots)
-	if not slots then
-		return { success = false, error = "Could not generate slots: " .. tostring(err) }
-	end
+	local maxCols = math.max(1, math.floor(math.sqrt(neededSlots * 2)))
 
 	local results = {
 		placed = 0,
@@ -1947,7 +1954,19 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 		errors = {},
 	}
 
-	for i, pos in ipairs(slots) do
+	local function countRealPrintersInFolder()
+		local count = 0
+		for _, c in ipairs(folder:GetChildren()) do
+			if c:IsA("Model") and c:GetAttribute("MoneyPrinterId") then
+				count += 1
+			end
+		end
+		return count
+	end
+
+	local realNow = countRealPrintersInFolder()
+
+	for i = 1, neededSlots do
 		if self:_isCancelled() then
 			return { success = false, error = "cancelled" }
 		end
@@ -1958,11 +1977,33 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 			break
 		end
 
+		local col = (i - 1) % maxCols
+		local row = math.floor((i - 1) / maxCols)
+		local targetPos = startPos + rightDir * (col * spacing) + downDir * (row * spacing)
+
 		local ok, success, err = pcall(function()
-			pcall(function() humanoid:UnequipTools() end)
-			tool.Parent = backpack
-			task.wait(0.1)
-			return placeToolInFolder(tool, folder, pos, info.orientationCF)
+			local h = self:_getHrp()
+			if h then
+				h.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0))
+			end
+			task.wait(0.3)
+			local hum = self:_getHumanoid()
+			if hum then
+				pcall(function() hum:UnequipTools() end)
+				task.wait(0.2)
+				pcall(function() hum:EquipTool(tool) end)
+				task.wait(0.3)
+			end
+			pcall(function() tool:Activate() end)
+			for t = 1, 30 do
+				task.wait(0.2)
+				local newCount = countRealPrintersInFolder()
+				if newCount > realNow then
+					realNow = newCount
+					return true
+				end
+			end
+			return false, "conversion timeout"
 		end)
 
 		if ok and success == true then
@@ -1971,13 +2012,13 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 			results.failed += 1
 			table.insert(results.errors, {
 				slot = i,
-				pos = { x = math.round(pos.X * 10) / 10, y = math.round(pos.Y * 10) / 10, z = math.round(pos.Z * 10) / 10 },
+				pos = { x = math.round(targetPos.X * 10) / 10, y = math.round(targetPos.Y * 10) / 10, z = math.round(targetPos.Z * 10) / 10 },
 				error = tostring((ok and err) or success or "unknown"),
 			})
 			pcall(function() tool.Parent = backpack end)
 		end
 
-		task.wait(0.2)
+		task.wait(0.1)
 	end
 
 	local finalBackpackCount = countPrintersInBackpack()
@@ -1996,7 +2037,7 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 			remaining_backpack = finalBackpackCount,
 			final_total_in_folder = finalFolderCount,
 			target_total = targetCount,
-			spacing = math.round((spacing or 4) * 100) / 100,
+			spacing = math.round(spacing * 100) / 100,
 			errors = results.errors,
 		},
 	}
