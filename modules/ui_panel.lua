@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "1.17.1",
+    version = "1.17.2",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -348,7 +348,7 @@ local function buildUI()
         local ok, err = pcall(function()
             ToggleUI.new(currentMainGui, {
                 parent = getUiParent(),
-                initialVisible = false,
+                initialVisible = true,
             })
         end)
         if not ok then
@@ -422,6 +422,7 @@ end
 local UIPanel = {}
 
 function UIPanel.run()
+	warn("[SanDiegoAgent] UIPanel.run() called")
 	getgenv().StopSanDiegoAgent = false
 
 	ensureCorrectServer()
