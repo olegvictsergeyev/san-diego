@@ -1480,6 +1480,243 @@ function CommandEngine:_placePrinterCommand(payload)
 	}
 end
 
+-- Printer placement helpers (region-based)
+local function findNearestMoneyPrintersFolder(playerPos)
+	local folders = {}
+	local seen = {}
+	local function scan(parent, depth)
+		if depth > 8 then return end
+		for _, c in ipairs(parent:GetChildren()) do
+			if c.Name == "MoneyPrinters" and not seen[c] and
+			   (c:IsA("Folder") or c:IsA("Model") or c:IsA("Configuration")) then
+				seen[c] = true
+				table.insert(folders, c)
+			end
+			if not c:IsA("BasePart") then
+				scan(c, depth + 1)
+			end
+		end
+	end
+	scan(game:GetService("Workspace"), 0)
+	if #folders == 0 then return nil, nil end
+	local best = folders[1]
+	local bestDist = math.huge
+	for _, f in ipairs(folders) do
+		local dist = math.huge
+		for _, child in ipairs(f:GetChildren()) do
+			local part = child:FindFirstChild("Printer_d") or child:FindFirstChild("Handle")
+			if part and part:IsA("BasePart") then
+				local d = (part.Position - playerPos).Magnitude
+				if d < dist then dist = d end
+			end
+		end
+		if dist == math.huge then
+			-- empty folder: distance to any BasePart in parent
+			local function findPart(p)
+				for _, cc in ipairs(p:GetChildren()) do
+					if cc:IsA("BasePart") then return cc.Position end
+					local fp = findPart(cc)
+					if fp then return fp end
+				end
+				return nil
+			end
+			local pPos = findPart(f.Parent)
+			if pPos then dist = (pPos - playerPos).Magnitude end
+		end
+		if dist < bestDist then
+			bestDist = dist
+			best = f
+		end
+	end
+	return best, bestDist
+end
+
+local function getPrinterPlacementInfo(folder)
+	local existing = {}
+	local positions = {}
+	local orientationCF = CFrame.new()
+	local floorLocalY = nil
+	local regionCF, regionSize
+	for _, c in ipairs(folder:GetChildren()) do
+		if c.Name:lower():find("print") or c:HasTag("MoneyPrinter") then
+			table.insert(existing, c)
+			local part = c:FindFirstChild("Printer_d") or c:FindFirstChild("Handle")
+			if part and part:IsA("BasePart") then
+				table.insert(positions, part.Position)
+				orientationCF = part.CFrame - part.CFrame.Position
+			end
+			local rc = c:GetAttribute("MoneyPrinterApartmentRegionCFrame")
+			local rs = c:GetAttribute("MoneyPrinterApartmentRegionSize")
+			if typeof(rc) == "CFrame" and typeof(rs) == "Vector3" then
+				regionCF = rc
+				regionSize = rs
+				if part and typeof(part.Position) == "Vector3" then
+					local lp = rc:PointToObjectSpace(part.Position)
+					floorLocalY = lp.Y
+				end
+			end
+		end
+	end
+	return {
+		folder = folder,
+		existing = existing,
+		positions = positions,
+		regionCF = regionCF,
+		regionSize = regionSize,
+		floorLocalY = floorLocalY,
+		orientationCF = orientationCF,
+	}
+end
+
+local function inferGridSpacing(info)
+	local spacing = 4
+	if #info.positions < 2 or typeof(info.regionCF) ~= "CFrame" then
+		return spacing
+	end
+	local locals = {}
+	for _, pos in ipairs(info.positions) do
+		table.insert(locals, info.regionCF:PointToObjectSpace(pos))
+	end
+	local xDists = {}
+	local zDists = {}
+	for i = 1, #locals do
+		for j = i + 1, #locals do
+			local dx = math.abs(locals[i].X - locals[j].X)
+			local dz = math.abs(locals[i].Z - locals[j].Z)
+			if dx > 0.5 and dx < 20 then table.insert(xDists, dx) end
+			if dz > 0.5 and dz < 20 then table.insert(zDists, dz) end
+		end
+	end
+	local function median(t)
+		if #t == 0 then return nil end
+		table.sort(t)
+		return t[math.floor(#t / 2) + 1]
+	end
+	local mx = median(xDists)
+	local mz = median(zDists)
+	if mx and mz then
+		spacing = math.min(mx, mz)
+	elseif mx then
+		spacing = mx
+	elseif mz then
+		spacing = mz
+	end
+	if spacing <= 0 then spacing = 4 end
+	return spacing
+end
+
+local function generateSlotsInRegion(info, maxCount)
+	if typeof(info.regionCF) ~= "CFrame" or typeof(info.regionSize) ~= "Vector3" or not info.floorLocalY then
+		return nil, "no region attributes on existing printers"
+	end
+	local spacing = inferGridSpacing(info)
+	local half = info.regionSize / 2
+	local margin = spacing * 0.6
+	local minX = -half.X + margin
+	local maxX = half.X - margin
+	local minZ = -half.Z + margin
+	local maxZ = half.Z - margin
+
+	local occupied = {}
+	local function key(x, z)
+		return tostring(math.round(x / (spacing / 2))) .. "," .. tostring(math.round(z / (spacing / 2)))
+	end
+	local existingLocals = {}
+	for _, pos in ipairs(info.positions) do
+		local lp = info.regionCF:PointToObjectSpace(pos)
+		table.insert(existingLocals, lp)
+		occupied[key(lp.X, lp.Z)] = true
+	end
+
+	local originLocal
+	if #existingLocals > 0 then
+		local sum = Vector3.new(0, 0, 0)
+		for _, lp in ipairs(existingLocals) do
+			sum = sum + lp
+		end
+		originLocal = sum / #existingLocals
+	else
+		originLocal = Vector3.new(0, info.floorLocalY, 0)
+	end
+
+	local candidates = {}
+	local maxOffset = math.max(
+		math.floor((maxX - minX) / spacing),
+		math.floor((maxZ - minZ) / spacing)
+	) + 2
+	for i = -maxOffset, maxOffset do
+		for j = -maxOffset, maxOffset do
+			local lx = originLocal.X + j * spacing
+			local lz = originLocal.Z + i * spacing
+			if lx < minX or lx > maxX or lz < minZ or lz > maxZ then continue end
+			local k = key(lx, lz)
+			if occupied[k] then continue end
+			local worldPos = info.regionCF:PointToWorldSpace(Vector3.new(lx, info.floorLocalY, lz))
+			local nearestDist = math.huge
+			for _, lp in ipairs(existingLocals) do
+				local d = math.sqrt((lp.X - lx) ^ 2 + (lp.Z - lz) ^ 2)
+				if d < nearestDist then nearestDist = d end
+			end
+			table.insert(candidates, { pos = worldPos, localPos = Vector3.new(lx, info.floorLocalY, lz), dist = nearestDist })
+		end
+	end
+
+	table.sort(candidates, function(a, b) return a.dist < b.dist end)
+
+	local slots = {}
+	local used = {}
+	for _, c in ipairs(candidates) do
+		if #slots >= maxCount then break end
+		local k = key(c.localPos.X, c.localPos.Z)
+		if not used[k] then
+			used[k] = true
+			table.insert(slots, c.pos)
+		end
+	end
+	return slots, nil, spacing
+end
+
+local function placeToolInFolder(tool, folder, targetPos, orientationCF)
+	local ok, err = pcall(function()
+		tool.Parent = folder
+		local handle = tool:FindFirstChild("Handle")
+		local printerD = tool:FindFirstChild("Printer_d")
+		local targetCF = CFrame.new(targetPos) * orientationCF
+		if handle and handle:IsA("BasePart") then
+			handle.CFrame = targetCF
+			handle.Anchored = true
+			handle.CanCollide = true
+		end
+		if printerD and printerD:IsA("BasePart") then
+			printerD.CFrame = targetCF
+			printerD.Anchored = true
+			printerD.CanCollide = true
+		end
+	end)
+	if not ok then
+		return false, tostring(err)
+	end
+	-- wait for server conversion
+	for i = 1, 30 do
+		task.wait(0.2)
+		if tool.Parent ~= folder then
+			-- could have been converted to a Model
+			return true
+		end
+		if tool:GetAttribute("MoneyPrinterId") then
+			return true
+		end
+		for _, c in ipairs(folder:GetChildren()) do
+			if c ~= tool and (c.Name:lower():find("print") or c:HasTag("MoneyPrinter")) then
+				if c:GetAttribute("MoneyPrinterId") then
+					return true
+				end
+			end
+		end
+	end
+	return false, "conversion timeout"
+end
+
 function CommandEngine:_placeAllPrintersCommand(payload)
 	local player = self:_getPlayer()
 	if not player then
@@ -1523,45 +1760,6 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 		return { success = false, error = "Backpack not found" }
 	end
 
-	-- Вспомогательные локальные функции.
-	local function unequipTools()
-		for _, c in ipairs(character:GetChildren()) do
-			if c:IsA("Tool") then
-				pcall(function() c.Parent = backpack end)
-			end
-		end
-		pcall(function() humanoid:UnequipTools() end)
-		task.wait(0.3)
-	end
-
-	local function resetInventory()
-		unequipTools()
-		-- Возвращаем в Backpack Tool'ы Money Printer, оказавшиеся в Workspace вне папок MoneyPrinters.
-		local function scan(parent)
-			for _, c in ipairs(parent:GetChildren()) do
-				if c:IsA("Tool") and c.Name:lower():find("print") then
-					local inMoneyPrinters = false
-					local p = c.Parent
-					while p do
-						if p.Name == "MoneyPrinters" then
-							inMoneyPrinters = true
-							break
-						end
-						p = p.Parent
-					end
-					if not inMoneyPrinters then
-						pcall(function() c.Parent = backpack end)
-					end
-				end
-				if not c:IsA("BasePart") then
-					scan(c)
-				end
-			end
-		end
-		scan(Workspace)
-		task.wait(0.2)
-	end
-
 	local function countPrintersInBackpack()
 		local count = 0
 		for _, c in ipairs(backpack:GetChildren()) do
@@ -1581,242 +1779,15 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 		return nil
 	end
 
-	local function getExistingPrinterPositions(folder)
-		local positions = {}
+	local function countPrintersInFolder(folder)
+		local count = 0
 		for _, c in ipairs(folder:GetChildren()) do
-			if c.Name:lower():find("print") then
-				local part = c:FindFirstChild("Printer_d") or c:FindFirstChild("Handle")
-				if part and part:IsA("BasePart") then
-					table.insert(positions, part.Position)
-				end
+			if c.Name:lower():find("print") or c:HasTag("MoneyPrinter") then
+				count += 1
 			end
 		end
-		return positions
+		return count
 	end
-
-	local function chooseTargetFolder(playerPos)
-		local folders = {}
-		local function scan(parent)
-			for _, c in ipairs(parent:GetChildren()) do
-				if c.Name == "MoneyPrinters" and (c:IsA("Folder") or c:IsA("Model")) then
-					table.insert(folders, c)
-				end
-				if not c:IsA("BasePart") then
-					scan(c)
-				end
-			end
-		end
-		scan(workspace)
-		if #folders == 0 then return nil, nil end
-
-		local scored = {}
-		for _, folder in ipairs(folders) do
-			local existingPositions = getExistingPrinterPositions(folder)
-			local existingCount = #existingPositions
-			local dist = math.huge
-			for _, pos in ipairs(existingPositions) do
-				local d = (pos - playerPos).Magnitude
-				if d < dist then dist = d end
-			end
-			-- Для пустых папок — по центру квартиры.
-			if dist == math.huge then
-				local function findPart(p)
-					for _, cc in ipairs(p:GetChildren()) do
-						if cc:IsA("BasePart") then return cc.Position end
-						local f = findPart(cc)
-						if f then return f end
-					end
-					return nil
-				end
-				local pPos = findPart(folder.Parent)
-				if pPos then dist = (pPos - playerPos).Magnitude end
-			end
-			local score = dist - existingCount * 20
-			table.insert(scored, { folder = folder, dist = dist, existing = existingCount, score = score })
-		end
-		table.sort(scored, function(a, b) return a.score < b.score end)
-
-		local best = scored[1]
-		if best.dist > maxDistance then
-			return nil, best.dist
-		end
-		return best.folder, best.existing
-	end
-
-	local function analyzeGrid(positions)
-		if #positions == 0 then return nil end
-
-		local pts = {}
-		for _, p in ipairs(positions) do
-			table.insert(pts, { x = p.X, z = p.Z, y = p.Y })
-		end
-
-		local function clusterBy(tolerance, axis)
-			local clusters = {}
-			local sorted = {}
-			for _, p in ipairs(pts) do table.insert(sorted, p) end
-			table.sort(sorted, function(a, b) return a[axis] < b[axis] end)
-			for _, p in ipairs(sorted) do
-				local added = false
-				for _, c in ipairs(clusters) do
-					if math.abs(c.center - p[axis]) <= tolerance then
-						c.center = (c.center * #c.points + p[axis]) / (#c.points + 1)
-						table.insert(c.points, p)
-						added = true
-						break
-					end
-				end
-				if not added then
-					table.insert(clusters, { center = p[axis], points = { p } })
-				end
-			end
-			return clusters
-		end
-
-		local tolerance = 1.5
-		local clustersX = clusterBy(tolerance, "x")
-		local clustersZ = clusterBy(tolerance, "z")
-
-		local rowAxis, colAxis
-		if #clustersX >= #clustersZ then
-			rowAxis = "z"
-			colAxis = "x"
-		else
-			rowAxis = "x"
-			colAxis = "z"
-		end
-
-		local rows = clusterBy(tolerance, rowAxis)
-		table.sort(rows, function(a, b) return a.center < b.center end)
-		for _, row in ipairs(rows) do
-			table.sort(row.points, function(a, b) return a[colAxis] < b[colAxis] end)
-		end
-
-		local colDists = {}
-		for _, row in ipairs(rows) do
-			for i = 2, #row.points do
-				table.insert(colDists, math.abs(row.points[i][colAxis] - row.points[i - 1][colAxis]))
-			end
-		end
-		local colSpacing = nil
-		if #colDists > 0 then
-			table.sort(colDists)
-			colSpacing = colDists[math.floor(#colDists / 2) + 1]
-		end
-
-		local rowDists = {}
-		for i = 2, #rows do
-			table.insert(rowDists, math.abs(rows[i].center - rows[i - 1].center))
-		end
-		local rowSpacing = nil
-		if #rowDists > 0 then
-			table.sort(rowDists)
-			rowSpacing = rowDists[math.floor(#rowDists / 2) + 1]
-		end
-
-		if not colSpacing or colSpacing <= 0 then colSpacing = 4 end
-		if not rowSpacing or rowSpacing <= 0 then rowSpacing = 4 end
-
-		local sumY = 0
-		for _, p in ipairs(pts) do sumY += p.y end
-		local floorY = sumY / #pts
-
-		local dirRow = (rowAxis == "x") and Vector3.new(1, 0, 0) or Vector3.new(0, 0, 1)
-		local dirCol = (colAxis == "x") and Vector3.new(1, 0, 0) or Vector3.new(0, 0, 1)
-		local firstPoint = rows[1].points[1]
-		local origin = Vector3.new(firstPoint.x, floorY, firstPoint.z)
-
-		return {
-			rows = rows,
-			rowAxis = rowAxis,
-			colAxis = colAxis,
-			rowSpacing = rowSpacing,
-			colSpacing = colSpacing,
-			origin = origin,
-			dirRow = dirRow,
-			dirCol = dirCol,
-			printersPerRow = #rows[1].points,
-			rowCount = #rows,
-			existingCount = #positions,
-		}
-	end
-
-	local function generateNextSlots(grid, maxCount)
-		local slots = {}
-		local occupied = {}
-		local function key(pos)
-			return tostring(math.round(pos.X / 0.5)) .. "," .. tostring(math.round(pos.Z / 0.5))
-		end
-		for _, row in ipairs(grid.rows) do
-			for _, p in ipairs(row.points) do
-				occupied[key(Vector3.new(p.x, p.y, p.z))] = true
-			end
-		end
-
-		local placed = grid.existingCount
-		local rowIndex = 0
-		local colIndex = 0
-
-		while placed < maxCount do
-			local lastRow = grid.rows[#grid.rows]
-			local lastRowLen = #lastRow.points
-			if lastRowLen < grid.printersPerRow then
-				rowIndex = grid.rowCount - 1
-				colIndex = lastRowLen
-			else
-				rowIndex = grid.rowCount
-				colIndex = 0
-			end
-
-			local pos = grid.origin + grid.dirCol * (colIndex * grid.colSpacing) + grid.dirRow * (rowIndex * grid.rowSpacing)
-			local k = key(pos)
-			if occupied[k] then
-				colIndex += 1
-				if colIndex >= grid.printersPerRow then
-					rowIndex += 1
-					colIndex = 0
-				end
-				placed += 1
-			else
-				table.insert(slots, pos)
-				occupied[k] = true
-				placed += 1
-			end
-		end
-
-		return slots
-	end
-
-	local function placePrinterAt(tool, folder, position)
-		unequipTools()
-		local ok, err = pcall(function()
-			tool.Parent = character
-			task.wait(0.3)
-			pcall(function() humanoid:UnequipTools() end)
-			task.wait(0.3)
-			tool.Parent = folder
-			local handle = tool:FindFirstChild("Handle")
-			local printerD = tool:FindFirstChild("Printer_d")
-			if handle and handle:IsA("BasePart") then
-				handle.CFrame = CFrame.new(position)
-				handle.Anchored = true
-				handle.CanCollide = true
-			end
-			if printerD and printerD:IsA("BasePart") then
-				printerD.CFrame = CFrame.new(position)
-				printerD.Anchored = true
-				printerD.CanCollide = true
-			end
-		end)
-		if not ok then
-			return false, tostring(err)
-		end
-		task.wait(0.3)
-		return tool:IsDescendantOf(folder), "not in folder after place"
-	end
-
-	-- Начало выполнения.
-	resetInventory()
 
 	local startBackpackCount = countPrintersInBackpack()
 	if startBackpackCount == 0 then
@@ -1829,19 +1800,26 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 	end
 	local playerPos = hrp.Position
 
-	local folder, folderDist = chooseTargetFolder(playerPos)
+	local folder, folderDist = findNearestMoneyPrintersFolder(playerPos)
 	if not folder then
 		return { success = false, error = "MoneyPrinters folder not found" }
 	end
-
-	local positions = getExistingPrinterPositions(folder)
-	local grid = analyzeGrid(positions)
-	if not grid then
-		return { success = false, error = "Could not analyze printer grid" }
+	if folderDist > maxDistance then
+		return { success = false, error = "MoneyPrinters folder too far: " .. tostring(math.round(folderDist * 10) / 10) }
 	end
 
-	local targetCount = math.min(grid.existingCount + startBackpackCount, maxTotal)
-	local slots = generateNextSlots(grid, targetCount)
+	local info = getPrinterPlacementInfo(folder)
+	if typeof(info.regionCF) ~= "CFrame" then
+		return { success = false, error = "No MoneyPrinterApartmentRegion attributes found" }
+	end
+
+	local existingCount = #info.existing
+	local targetCount = math.min(existingCount + startBackpackCount, maxTotal)
+	local neededSlots = targetCount - existingCount
+	local slots, err, spacing = generateSlotsInRegion(info, neededSlots)
+	if not slots then
+		return { success = false, error = "Could not generate slots: " .. tostring(err) }
+	end
 
 	local results = {
 		placed = 0,
@@ -1861,22 +1839,30 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 			break
 		end
 
-		local ok, err = placePrinterAt(tool, folder, pos)
-		if ok then
+		local ok, success, err = pcall(function()
+			pcall(function() humanoid:UnequipTools() end)
+			tool.Parent = backpack
+			task.wait(0.1)
+			return placeToolInFolder(tool, folder, pos, info.orientationCF)
+		end)
+
+		if ok and success == true then
 			results.placed += 1
 		else
 			results.failed += 1
-			table.insert(results.errors, { slot = i, pos = { x = pos.X, y = pos.Y, z = pos.Z }, error = tostring(err) })
+			table.insert(results.errors, {
+				slot = i,
+				pos = { x = math.round(pos.X * 10) / 10, y = math.round(pos.Y * 10) / 10, z = math.round(pos.Z * 10) / 10 },
+				error = tostring((ok and err) or success or "unknown"),
+			})
 			pcall(function() tool.Parent = backpack end)
 		end
 
-		task.wait(0.3)
+		task.wait(0.2)
 	end
 
-	resetInventory()
-
 	local finalBackpackCount = countPrintersInBackpack()
-	local finalPositions = getExistingPrinterPositions(folder)
+	local finalFolderCount = countPrintersInFolder(folder)
 
 	return {
 		success = true,
@@ -1884,20 +1870,14 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 			folder = folder:GetFullName(),
 			folder_distance = math.round(folderDist * 10) / 10,
 			start_backpack = startBackpackCount,
+			start_folder = existingCount,
 			placed = results.placed,
 			failed = results.failed,
 			skipped_no_printer = results.skippedNoPrinter,
 			remaining_backpack = finalBackpackCount,
-			final_total_in_folder = #finalPositions,
+			final_total_in_folder = finalFolderCount,
 			target_total = targetCount,
-			grid = {
-				row_axis = grid.rowAxis,
-				col_axis = grid.colAxis,
-				row_spacing = math.round(grid.rowSpacing * 100) / 100,
-				col_spacing = math.round(grid.colSpacing * 100) / 100,
-				printers_per_row = grid.printersPerRow,
-				row_count = grid.rowCount,
-			},
+			spacing = math.round((spacing or 4) * 100) / 100,
 			errors = results.errors,
 		},
 	}
