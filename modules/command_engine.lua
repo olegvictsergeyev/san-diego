@@ -1611,7 +1611,7 @@ local function generateSlotsInRegion(info, maxCount)
 	end
 	local spacing = inferGridSpacing(info)
 	local half = info.regionSize / 2
-	local margin = spacing * 0.6
+	local margin = math.max(spacing * 0.6, 3)
 	local minX = -half.X + margin
 	local maxX = half.X - margin
 	local minZ = -half.Z + margin
@@ -1649,11 +1649,12 @@ local function generateSlotsInRegion(info, maxCount)
 				if d < nearestDist then nearestDist = d end
 			end
 			if nearestDist < spacing * 0.8 then continue end
-			table.insert(candidates, { pos = worldPos, localPos = Vector3.new(lx, info.floorLocalY, lz), dist = nearestDist })
+			local centerDist = math.sqrt(lx * lx + lz * lz)
+			table.insert(candidates, { pos = worldPos, localPos = Vector3.new(lx, info.floorLocalY, lz), centerDist = centerDist, nearestDist = nearestDist })
 		end
 	end
 
-	table.sort(candidates, function(a, b) return a.dist < b.dist end)
+	table.sort(candidates, function(a, b) return a.centerDist < b.centerDist end)
 
 	local slots = {}
 	local used = {}
