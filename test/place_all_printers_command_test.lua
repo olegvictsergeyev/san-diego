@@ -1,8 +1,8 @@
 --[[
-    San Diego Agent — Test: run place_all_printers command standalone
-    ================================================================
+    San Diego Agent — Simulation: run place_all_printers command standalone
+    ========================================================================
     Загружает modules/command_engine.lua и вызывает _placeAllPrintersCommand
-    с маленьким max_total, чтобы проверить логику расстановки.
+    так же, как это делает основной агент. Полезно для проверки перед запуском агента.
 ]]
 
 local logs = {}
@@ -17,10 +17,10 @@ end
 local function copy()
     local text = table.concat(logs, "\n")
     if setclipboard then pcall(function() setclipboard(text) end) end
-    if writefile then pcall(function() writefile("place_all_printers_command_test_log.txt", text) end) end
+    if writefile then pcall(function() writefile("place_all_printers_command_simulation_log.txt", text) end) end
 end
 
-log("========== PLACE ALL PRINTERS COMMAND TEST ==========")
+log("========== PLACE ALL PRINTERS COMMAND SIMULATION ==========")
 
 local baseUrl = "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main"
 local url = baseUrl .. "/modules/command_engine.lua?nocache=" .. tostring(tick())
@@ -57,9 +57,9 @@ end
 engine.cancelled = false
 log("Engine created")
 
-log("Calling _placeAllPrintersCommand with max_total=3 ...")
+log("Calling _placeAllPrintersCommand with max_total=50 ...")
 local ok, result = pcall(function()
-    return engine:_placeAllPrintersCommand({ max_total = 3, max_distance = 200 })
+    return engine:_placeAllPrintersCommand({ max_total = 50, max_distance = 200 })
 end)
 
 if not ok then
@@ -76,7 +76,7 @@ if result.data then
     log("Result data:")
     for k, v in pairs(result.data) do
         if typeof(v) == "table" and k == "errors" then
-            log("  " .. k .. " =", "(table)")
+            log("  " .. k .. " =", "(table with", tostring(#v), "errors)")
             for i, err in ipairs(v) do
                 log("    error #" .. tostring(i) .. ":")
                 for ek, ev in pairs(err) do
