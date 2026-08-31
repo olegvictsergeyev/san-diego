@@ -75,7 +75,22 @@ end
 if result.data then
     log("Result data:")
     for k, v in pairs(result.data) do
-        if typeof(v) == "table" then
+        if typeof(v) == "table" and k == "errors" then
+            log("  " .. k .. " =", "(table)")
+            for i, err in ipairs(v) do
+                log("    error #" .. tostring(i) .. ":")
+                for ek, ev in pairs(err) do
+                    if typeof(ev) == "table" then
+                        log("      " .. tostring(ek) .. " =", tostring(ev))
+                        for pk, pv in pairs(ev) do
+                            log("        " .. tostring(pk) .. " =", tostring(pv))
+                        end
+                    else
+                        log("      " .. tostring(ek) .. " =", tostring(ev))
+                    end
+                end
+            end
+        elseif typeof(v) == "table" then
             log("  " .. k .. " =", "(table)")
             for kk, vv in pairs(v) do
                 log("    " .. tostring(kk) .. " =", tostring(vv))
