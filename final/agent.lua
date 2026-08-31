@@ -76,7 +76,28 @@ if not markerOk then
 end
 
 local marker = markerErr
-local BASE_URL = getgenv().SanDiegoAgentBaseUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main"
+
+local function getBaseUrl()
+    if typeof(getgenv) == "function" then
+        local ok, genv = pcall(getgenv)
+        if ok and genv and typeof(genv.SanDiegoAgentBaseUrl) == "string" then
+            log("INFO", "using getgenv().SanDiegoAgentBaseUrl")
+            return genv.SanDiegoAgentBaseUrl
+        end
+    end
+    if typeof(_G) == "table" and typeof(_G.SanDiegoAgentBaseUrl) == "string" then
+        log("INFO", "using _G.SanDiegoAgentBaseUrl")
+        return _G.SanDiegoAgentBaseUrl
+    end
+    if typeof(shared) == "table" and typeof(shared.SanDiegoAgentBaseUrl) == "string" then
+        log("INFO", "using shared.SanDiegoAgentBaseUrl")
+        return shared.SanDiegoAgentBaseUrl
+    end
+    log("INFO", "using default base URL (main branch)")
+    return "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main"
+end
+
+local BASE_URL = getBaseUrl()
 local UI_PANEL_URL = BASE_URL .. "/modules/ui_panel.lua?nocache=" .. tostring(tick())
 log("INFO", "step 4/5: loading ui_panel from", UI_PANEL_URL)
 

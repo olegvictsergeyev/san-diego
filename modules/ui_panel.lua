@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "1.17.4",
+    version = "1.17.5",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -35,7 +35,20 @@ local CONFIG = {
 
     -- URL модулей
     moduleUrls = (function()
-        local base = getgenv().SanDiegoAgentBaseUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main"
+        local base
+        if typeof(getgenv) == "function" then
+            local ok, genv = pcall(getgenv)
+            if ok and genv and typeof(genv.SanDiegoAgentBaseUrl) == "string" then
+                base = genv.SanDiegoAgentBaseUrl
+            end
+        end
+        if not base and typeof(_G) == "table" and typeof(_G.SanDiegoAgentBaseUrl) == "string" then
+            base = _G.SanDiegoAgentBaseUrl
+        end
+        if not base and typeof(shared) == "table" and typeof(shared.SanDiegoAgentBaseUrl) == "string" then
+            base = shared.SanDiegoAgentBaseUrl
+        end
+        base = base or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main"
         return {
             http_client = base .. "/modules/http_client.lua",
             state_collector = base .. "/modules/state_collector.lua",
@@ -53,7 +66,22 @@ local CONFIG = {
     end)(),
 
     -- URL загрузчика для перезапуска после телепорта
-    agentLoaderUrl = (getgenv().SanDiegoAgentBaseUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main") .. "/final/agent.lua",
+    agentLoaderUrl = (function()
+        local base
+        if typeof(getgenv) == "function" then
+            local ok, genv = pcall(getgenv)
+            if ok and genv and typeof(genv.SanDiegoAgentBaseUrl) == "string" then
+                base = genv.SanDiegoAgentBaseUrl
+            end
+        end
+        if not base and typeof(_G) == "table" and typeof(_G.SanDiegoAgentBaseUrl) == "string" then
+            base = _G.SanDiegoAgentBaseUrl
+        end
+        if not base and typeof(shared) == "table" and typeof(shared.SanDiegoAgentBaseUrl) == "string" then
+            base = shared.SanDiegoAgentBaseUrl
+        end
+        return (base or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main") .. "/final/agent.lua"
+    end)(),
 
     -- true при запуске через loadstring (script == nil), иначе false
     useRemoteModules = (script == nil),
