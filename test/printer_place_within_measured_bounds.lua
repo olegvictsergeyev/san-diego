@@ -21,12 +21,12 @@ local CollectionService = game:GetService("CollectionService")
 local player = Players.LocalPlayer
 local logs = {}
 
--- Margins per side (studs). MARGIN_ROW_START = -1 означает "авто = размер принтера".
-local MARGIN_ROW_START = -1   -- от стены, откуда начинаются ряды (перпендикулярной стене)
+-- Margins per side (studs). MARGIN_ROW_START = -2.5 означает "авто = 2.5 * размер принтера".
+local MARGIN_ROW_START = -2.5 -- от стены, откуда начинаются ряды (перпендикулярной стене)
 local MARGIN_ROW_END   = 0.0  -- от противоположной стены рядам можно упираться
 local MARGIN_COL_START = 0.0  -- от параллельной стены (начало колонок)
 local MARGIN_COL_END   = 0.0  -- от противоположной параллельной стены
-local ROW_OVERLAP_RATIO = 0.25 -- наложение внутри ряда (0 = без, 0.25 = 25%)
+local TARGET_COLS = 12        -- желаемое число принтеров в одном ряду (0 = авто по вместимости)
 local MAX_PRINTERS = 50
 
 local function log(...)
@@ -336,7 +336,7 @@ end
 
 local size = existingFootprint or getToolSize()
 local half = size / 2
-local rowStartMargin = (MARGIN_ROW_START < 0) and size or MARGIN_ROW_START
+local rowStartMargin = (MARGIN_ROW_START < 0) and (size * math.abs(MARGIN_ROW_START)) or MARGIN_ROW_START
 log("Final spacing size:", tostring(size))
 log("Row start margin:", tostring(rowStartMargin))
 
@@ -366,10 +366,18 @@ else
 end
 
 local startPos = Vector3.new(startX, bounds.floorY, startZ)
-local rowSpacing = math.max(size * (1 - ROW_OVERLAP_RATIO), 0.1)
+
+-- Compute row spacing to fit exactly TARGET_COLS printers in the row
+local rowSpacing
+if TARGET_COLS and TARGET_COLS > 1 then
+    rowSpacing = math.max(0.1, usableRow / (TARGET_COLS - 1))
+    log("Target cols:", tostring(TARGET_COLS), "rowSpacing:", tostring(rowSpacing))
+else
+    rowSpacing = size
+end
 local colSpacing = size
 
-local maxCols = math.max(1, math.floor(usableRow / rowSpacing) + 1)
+local maxCols = math.max(1, TARGET_COLS and TARGET_COLS or math.floor(usableRow / size) + 1)
 local maxRows = math.max(1, math.floor(usableCol / colSpacing) + 1)
 local capacity = maxCols * maxRows
 local totalToPlace = math.min(backpackCount, capacity, MAX_PRINTERS)
