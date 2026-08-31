@@ -146,9 +146,10 @@ local half = regionSize / 2
 local floorLocalY = -half.Y + spacing / 2
 log("Floor local Y:", tostring(floorLocalY))
 
--- Top-left corner: local (-half.X + spacing/2, floorLocalY, half.Z - spacing/2)
-local margin = spacing * 0.5
+-- Top-left corner: local (-half.X + margin, floorLocalY, half.Z - margin)
+local margin = spacing
 local startLocal = Vector3.new(-half.X + margin, floorLocalY, half.Z - margin)
+log("Margin (one printer):", tostring(margin))
 log("Start local (top-left):", tostring(startLocal))
 
 -- Generate 3 positions: fill row along +X, next row -Z
