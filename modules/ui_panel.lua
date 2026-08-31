@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "1.17.2",
+    version = "1.17.3",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -67,20 +67,30 @@ local CONFIG = {
 }
 
 local function loadModule(name)
+    warn("[SanDiegoAgent][UI] loadModule(" .. tostring(name) .. ")")
     if CONFIG.useRemoteModules or not script or typeof(script) ~= "Instance" or not script.Parent then
         local url = CONFIG.moduleUrls[name]
         if not url then
             error("module URL not configured: " .. tostring(name))
         end
-        -- Обходим кэш raw.githubusercontent.com
         url = url .. "?nocache=" .. tostring(tick())
-        local source = game:HttpGet(url)
+        warn("[SanDiegoAgent][UI] fetching " .. tostring(name) .. " from " .. url)
+        local ok, source = pcall(function() return game:HttpGet(url) end)
+        if not ok then
+            error("HttpGet failed for " .. name .. ": " .. tostring(source))
+        end
+        if typeof(source) ~= "string" or #source == 0 then
+            error("empty source for " .. name)
+        end
+        warn("[SanDiegoAgent][UI] " .. name .. " source length " .. tostring(#source))
         local fn, err = loadstring(source, name)
         if not fn then
-            error("failed to load module " .. name .. ": " .. tostring(err))
+            error("loadstring failed for " .. name .. ": " .. tostring(err))
         end
+        warn("[SanDiegoAgent][UI] executing " .. name)
         return fn()
     else
+        warn("[SanDiegoAgent][UI] local require " .. name)
         return require(script.Parent:WaitForChild(name))
     end
 end
@@ -148,15 +158,20 @@ local function installAutoexec()
 end
 
 local function startAgent()
+    warn("[SanDiegoAgent][UI] startAgent() called")
     if currentAgent then
+        warn("[SanDiegoAgent][UI] stopping existing agent")
         currentAgent:stop()
         currentAgent = nil
         getgenv().SanDiegoAgentRunning = nil
     end
     currentAgent = makeAgent()
+    warn("[SanDiegoAgent][UI] agent instance created")
     currentAgent:start()
+    warn("[SanDiegoAgent][UI] agent started")
     startWatcher()
     installAutoexec()
+    warn("[SanDiegoAgent][UI] startAgent() finished")
 end
 
 local function stopAgent()
@@ -219,6 +234,7 @@ local function copyToClipboard(text)
 end
 
 local function loadOrion()
+    warn("[SanDiegoAgent][UI] loading Orion")
     local ok, Orion = pcall(function()
         return loadstring(game:HttpGet("https://raw.githubusercontent.com/OrionLibrary/Orion/main/source.lua"))()
     end)
@@ -226,6 +242,7 @@ local function loadOrion()
         warn("[SanDiegoAgent][UI] Failed to load Orion:", tostring(Orion))
         return nil
     end
+    warn("[SanDiegoAgent][UI] Orion loaded")
     return Orion
 end
 
@@ -319,14 +336,17 @@ local function cleanupExistingUi()
 end
 
 local function buildUI()
+    warn("[SanDiegoAgent][UI] buildUI() start")
     local Orion = loadOrion()
     if not Orion then
         warn("[SanDiegoAgent][UI] buildUI aborted: Orion not loaded")
         return
     end
 
+    warn("[SanDiegoAgent][UI] cleaning up existing UI")
     cleanupExistingUi()
 
+    warn("[SanDiegoAgent][UI] collecting existing ScreenGuis")
     local hui = Compat.gethui()
     local existingGuis = {}
     for _, sg in ipairs(game.CoreGui:GetChildren()) do
@@ -340,11 +360,15 @@ local function buildUI()
         end
     end
 
+    warn("[SanDiegoAgent][UI] creating Orion window")
     local window = Orion:CreateOrion("San Diego Agent")
+    warn("[SanDiegoAgent][UI] Orion window created")
+
     task.wait(0.1)
     currentMainGui = findOrionGui(existingGuis)
 
     if currentMainGui then
+        warn("[SanDiegoAgent][UI] main gui found:", currentMainGui:GetFullName())
         local ok, err = pcall(function()
             ToggleUI.new(currentMainGui, {
                 parent = getUiParent(),
@@ -358,6 +382,7 @@ local function buildUI()
         warn("[SanDiegoAgent][UI] Orion ScreenGui not found, toggle will not be created")
     end
 
+    warn("[SanDiegoAgent][UI] creating main tab")
     local tabMain = window:CreateSection("Главное")
 
     local pos = getPosition()
@@ -381,35 +406,44 @@ local function buildUI()
     tabMain:TextLabel("Balance: " .. tostring(bal))
 
     -- Автозапуск агента
+    warn("[SanDiegoAgent][UI] starting agent from buildUI")
     startAgent()
 
     -- Автозакрытие стартовых попапов (StarterPack и др.)
+    warn("[SanDiegoAgent][UI] starting popup closer")
     popupCloser:start()
 
     -- Обновление координат и баланса в UI
+    warn("[SanDiegoAgent][UI] starting UI update loop")
     task.spawn(function()
         while true do
             updateInfoLabels()
             task.wait(0.5)
         end
     end)
+    warn("[SanDiegoAgent][UI] buildUI() finished")
 end
 
 local function runCore()
+	warn("[SanDiegoAgent][UI] runCore() called, coreStarted=" .. tostring(coreStarted))
 	if coreStarted then
+		warn("[SanDiegoAgent][UI] runCore() already started, returning")
 		return
 	end
 	coreStarted = true
 
 	if CONFIG.showUI then
+		warn("[SanDiegoAgent][UI] showUI=true, building UI")
 		buildUI()
 	else
+		warn("[SanDiegoAgent][UI] showUI=false, starting agent directly")
 		startAgent()
 		popupCloser:start()
 		installAutoexec()
 	end
 
 	-- Фоновый поток для обработки флага остановки
+	warn("[SanDiegoAgent][UI] starting stop-flag watcher")
 	task.spawn(function()
 		while not getgenv().StopSanDiegoAgent do
 			task.wait(1)
