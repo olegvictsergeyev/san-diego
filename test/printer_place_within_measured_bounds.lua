@@ -1,14 +1,16 @@
 --[[
-    San Diego Agent — Place printers inside measured room bounds v2
+    San Diego Agent — Place printers inside measured room bounds v3
     ==================================================================
-    Использует getgenv().RoomPerimeter (или fallback) и расставляет принтеры
-    строго внутри комнаты:
-    - ряды вдоль более длинной стороны;
-    - внутри ряда накладывание 50% (шаг = 0.5 * размер);
-    - между рядами зазора нет;
-    - отступ от стен = 0.3, чтобы не вылезать;
-    - отслеживает MoneyPrinterId каждого поставленного принтера,
-      исключая ложные срабатывания.
+    - Собирает старые принтеры.
+    - Берёт getgenv().RoomPerimeter (или fallback).
+    - Измеряет реальный размер уже стоящего принтера (если есть), иначе берёт размер Tool'а.
+    - Ряды вдоль более длинной стороны.
+    - Отступы:
+        * от стены, откуда начинаются ряды (перпендикулярной) — MARGIN_ROW_START;
+        * от противоположной стены ряда — MARGIN_ROW_END (можно 0, чтобы ряды упирались);
+        * от параллельных стен — MARGIN_COL_START / MARGIN_COL_END (по умолчанию 0).
+    - Без наложения: сервер отклоняет пересечения.
+    - Контроль по MoneyPrinterId.
 ]]
 
 local Players = game:GetService("Players")
@@ -19,8 +21,11 @@ local CollectionService = game:GetService("CollectionService")
 local player = Players.LocalPlayer
 local logs = {}
 
-local ROW_OVERLAP_RATIO = 0.0 -- без наложения: сервер отклоняет пересечения
-local WALL_MARGIN = 1.0       -- серьёзный отступ от стен, чтобы модель не вылезала
+-- Margins per side (studs)
+local MARGIN_ROW_START = 1.5  -- от стены, откуда начинаются ряды (перпендикулярной стене)
+local MARGIN_ROW_END   = 0.0  -- от противоположной стены рядам можно упираться
+local MARGIN_COL_START = 0.0  -- от параллельной стены (начало колонок)
+local MARGIN_COL_END   = 0.0  -- от противоположной параллельной стены
 local MAX_PRINTERS = 50
 
 local function log(...)
@@ -35,10 +40,10 @@ end
 local function copy()
     local text = table.concat(logs, "\n")
     if setclipboard then pcall(function() setclipboard(text) end) end
-    if writefile then pcall(function() writefile("printer_place_within_measured_bounds_v2_log.txt", text) end) end
+    if writefile then pcall(function() writefile("printer_place_within_measured_bounds_v3_log.txt", text) end) end
 end
 
-log("========== PLACE WITHIN MEASURED BOUNDS v2 ==========")
+log("========== PLACE WITHIN MEASURED BOUNDS v3 ==========")
 log("Player:", player.Name)
 
 -- ---------------------------------------------------------------------------
@@ -139,6 +144,20 @@ local function getToolSize()
     return 4
 end
 
+local function getExistingModelFootprint(folder)
+    for _, c in ipairs(folder:GetChildren()) do
+        if c:IsA("Model") and c:GetAttribute("MoneyPrinterId") then
+            local ok, ext = pcall(function() return c:GetExtentsSize() end)
+            if ok and ext then
+                local s = math.max(ext.X, ext.Z)
+                log("Existing model footprint size:", tostring(s))
+                return s
+            end
+        end
+    end
+    return nil
+end
+
 local function getRealPrinterIds(folder)
     local ids = {}
     for _, c in ipairs(folder:GetChildren()) do
@@ -191,6 +210,14 @@ end
 log("Target folder:", folder:GetFullName())
 
 -- ---------------------------------------------------------------------------
+-- Measure existing model footprint BEFORE collecting
+-- ---------------------------------------------------------------------------
+local existingFootprint = getExistingModelFootprint(folder)
+if existingFootprint then
+    log("Will use existing model footprint for spacing:", tostring(existingFootprint))
+end
+
+-- ---------------------------------------------------------------------------
 -- Collect existing printers (robust)
 -- ---------------------------------------------------------------------------
 local pickupRemote = ReplicatedStorage:FindFirstChild("__remotes", true)
@@ -203,16 +230,12 @@ local function tryFirePrompt(obj)
     if not obj then return false end
     local prompt = obj:FindFirstChildOfClass("ProximityPrompt")
     if prompt then
-        local ok = pcall(function()
-            fireproximityprompt(prompt)
-        end)
+        local ok = pcall(function() fireproximityprompt(prompt) end)
         if ok then return true end
     end
     local clicker = obj:FindFirstChildOfClass("ClickDetector")
     if clicker then
-        local ok = pcall(function()
-            fireclickdetector(clicker)
-        end)
+        local ok = pcall(function() fireclickdetector(clicker) end)
         if ok then return true end
     end
     return false
@@ -222,24 +245,17 @@ local function tryRemoteCollect(model)
     if not pickupRemote then return false end
     for _, args in ipairs({ { model }, { model, getHrp() and getHrp().Position }, { folder, model }, {} }) do
         local ok, res = pcall(function() return pickupRemote:InvokeServer(unpack(args)) end)
-        if ok then
-            return true
-        end
+        if ok then return true end
     end
     return false
 end
 
 local function collectPrinter(model, backpack)
-    local fullName = model:GetFullName()
     log("  Collecting:", model.Name, "Class:", model.ClassName)
-
-    -- Try remote
     if tryRemoteCollect(model) then
         log("    remote ok")
         return true
     end
-
-    -- Try prompt/clicker on model or descendants
     if tryFirePrompt(model) then
         log("    prompt/click ok")
         return true
@@ -250,23 +266,19 @@ local function collectPrinter(model, backpack)
             return true
         end
     end
-
-    -- Fallback: move Tool to backpack
     local ok, err = pcall(function() model.Parent = backpack end)
     if ok then
         log("    Parent=Backpack ok")
         return true
     else
         log("    Parent=Backpack failed:", tostring(err))
+        return false
     end
-
-    return false
 end
 
 local function collectAllPrinters()
     local backpack = player:FindFirstChild("Backpack")
     if not backpack then return end
-
     for attempt = 1, 3 do
         local remaining = {}
         for _, c in ipairs(folder:GetChildren()) do
@@ -312,8 +324,9 @@ if backpackCount == 0 then
     return
 end
 
-local size = getToolSize()
+local size = existingFootprint or getToolSize()
 local half = size / 2
+log("Final spacing size:", tostring(size))
 
 -- ---------------------------------------------------------------------------
 -- Choose orientation: rows along longer side
@@ -322,27 +335,26 @@ local widthX = bounds.maxX - bounds.minX
 local widthZ = bounds.maxZ - bounds.minZ
 
 local rowDir, colDir, startX, startZ, usableRow, usableCol
-local margin = WALL_MARGIN
 if widthZ >= widthX then
     rowDir = Vector3.new(0, 0, 1)
     colDir = Vector3.new(1, 0, 0)
-    startX = bounds.minX + margin + half
-    startZ = bounds.minZ + margin + half
-    usableRow = widthZ - size - 2 * margin
-    usableCol = widthX - size - 2 * margin
+    startX = bounds.minX + MARGIN_COL_START + half
+    startZ = bounds.minZ + MARGIN_ROW_START + half
+    usableRow = widthZ - MARGIN_ROW_START - MARGIN_ROW_END - size
+    usableCol = widthX - MARGIN_COL_START - MARGIN_COL_END - size
     log("Rows along Z (longer wall). Cols along X.")
 else
     rowDir = Vector3.new(1, 0, 0)
     colDir = Vector3.new(0, 0, 1)
-    startX = bounds.minX + margin + half
-    startZ = bounds.minZ + margin + half
-    usableRow = widthX - size - 2 * margin
-    usableCol = widthZ - size - 2 * margin
+    startX = bounds.minX + MARGIN_ROW_START + half
+    startZ = bounds.minZ + MARGIN_COL_START + half
+    usableRow = widthX - MARGIN_ROW_START - MARGIN_ROW_END - size
+    usableCol = widthZ - MARGIN_COL_START - MARGIN_COL_END - size
     log("Rows along X (longer wall). Cols along Z.")
 end
 
 local startPos = Vector3.new(startX, bounds.floorY, startZ)
-local rowSpacing = math.max(size * (1 - ROW_OVERLAP_RATIO), 0.1)
+local rowSpacing = size      -- без наложения
 local colSpacing = size
 
 local maxCols = math.max(1, math.floor(usableRow / rowSpacing) + 1)
@@ -350,7 +362,8 @@ local maxRows = math.max(1, math.floor(usableCol / colSpacing) + 1)
 local capacity = maxCols * maxRows
 local totalToPlace = math.min(backpackCount, capacity, MAX_PRINTERS)
 
-log("Wall margin:", tostring(margin))
+log("Margins row start/end:", tostring(MARGIN_ROW_START), "/", tostring(MARGIN_ROW_END))
+log("Margins col start/end:", tostring(MARGIN_COL_START), "/", tostring(MARGIN_COL_END))
 log("Usable row length:", tostring(usableRow), "max cols:", tostring(maxCols))
 log("Usable col length:", tostring(usableCol), "max rows:", tostring(maxRows))
 log("Capacity:", tostring(capacity), "Will place:", tostring(totalToPlace))
@@ -380,11 +393,15 @@ for i = 1, totalToPlace do
     local row = math.floor((i - 1) / maxCols)
     local targetPos = startPos + rowDir * (col * rowSpacing) + colDir * (row * colSpacing)
 
-    -- Clamp with margin
+    -- Clamp strictly inside bounds with per-side margins
+    local minXCl = bounds.minX + MARGIN_COL_START + half
+    local maxXCl = bounds.maxX - MARGIN_COL_END - half
+    local minZCl = bounds.minZ + MARGIN_ROW_START + half
+    local maxZCl = bounds.maxZ - MARGIN_ROW_END - half
     targetPos = Vector3.new(
-        math.clamp(targetPos.X, bounds.minX + margin + half, bounds.maxX - margin - half),
+        math.clamp(targetPos.X, minXCl, maxXCl),
         targetPos.Y,
-        math.clamp(targetPos.Z, bounds.minZ + margin + half, bounds.maxZ - margin - half)
+        math.clamp(targetPos.Z, minZCl, maxZCl)
     )
 
     log("Target pos:", tostring(targetPos))
@@ -404,7 +421,7 @@ for i = 1, totalToPlace do
         end
         pcall(function() tool:Activate() end)
 
-        -- Wait for a NEW MoneyPrinterId, not just any count increase
+        -- Wait for a NEW MoneyPrinterId
         for w = 1, 45 do
             task.wait(0.2)
             local foundId = nil
@@ -433,7 +450,6 @@ for i = 1, totalToPlace do
         local msg = tostring((slotOk and errMsg) or success or "unknown")
         log("FAILED:", msg)
         table.insert(errors, { slot = i, pos = tostring(targetPos), error = msg })
-        -- If tool still exists and is not destroyed, return to backpack
         pcall(function()
             if tool and tool.Parent then tool.Parent = player.Backpack end
         end)
