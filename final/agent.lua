@@ -78,6 +78,11 @@ end
 local marker = markerErr
 
 local function getBaseUrl()
+    -- Priority 0: injected by launcher script via prepended local variable
+    if typeof(SanDiegoAgentBaseUrlOverride) == "string" then
+        log("INFO", "using injected SanDiegoAgentBaseUrlOverride")
+        return SanDiegoAgentBaseUrlOverride
+    end
     -- Priority 1: argument passed directly via loadstring(...)(baseUrl)
     local args = {...}
     if #args > 0 and typeof(args[1]) == "string" then
