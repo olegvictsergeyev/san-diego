@@ -18,7 +18,7 @@ local CollectionService = game:GetService("CollectionService")
 local player = Players.LocalPlayer
 local logs = {}
 
-local ROW_OVERLAP = 0.3
+local ROW_OVERLAP_RATIO = 0.75 -- каждый следующий принтер в ряду накладывается на 75% предыдущего
 local MAX_PRINTERS = 50
 
 local function log(...)
@@ -260,7 +260,7 @@ else
 end
 
 local startPos = Vector3.new(startX, bounds.floorY, startZ)
-local rowSpacing = math.max(size - ROW_OVERLAP, 0.1)
+local rowSpacing = math.max(size * (1 - ROW_OVERLAP_RATIO), 0.1)
 local colSpacing = size
 
 local maxCols = math.max(1, math.floor(usableRow / rowSpacing) + 1)
