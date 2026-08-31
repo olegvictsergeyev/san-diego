@@ -1,13 +1,14 @@
 --[[
-    San Diego Agent — Place printers inside measured room bounds
-    ==============================================================
-    Использует координаты из getgenv().RoomPerimeter (или захардкоженный fallback)
-    и расставляет принтеры впритык к стенам:
-    - ряды идут вдоль более длинной стороны комнаты;
-    - внутри ряда принтеры могут немного накладываться (экономия места);
-    - между рядами зазора нет.
-
-    Перед раскладкой собирает все уже стоящие принтеры.
+    San Diego Agent — Place printers inside measured room bounds v2
+    ==================================================================
+    Использует getgenv().RoomPerimeter (или fallback) и расставляет принтеры
+    строго внутри комнаты:
+    - ряды вдоль более длинной стороны;
+    - внутри ряда накладывание 50% (шаг = 0.5 * размер);
+    - между рядами зазора нет;
+    - отступ от стен = 0.3, чтобы не вылезать;
+    - отслеживает MoneyPrinterId каждого поставленного принтера,
+      исключая ложные срабатывания.
 ]]
 
 local Players = game:GetService("Players")
@@ -18,7 +19,8 @@ local CollectionService = game:GetService("CollectionService")
 local player = Players.LocalPlayer
 local logs = {}
 
-local ROW_OVERLAP_RATIO = 0.75 -- каждый следующий принтер в ряду накладывается на 75% предыдущего
+local ROW_OVERLAP_RATIO = 0.5 -- 50% наложение внутри ряда
+local WALL_MARGIN = 0.3       -- доп. отступ от стен, чтобы модель не вылезала
 local MAX_PRINTERS = 50
 
 local function log(...)
@@ -33,10 +35,10 @@ end
 local function copy()
     local text = table.concat(logs, "\n")
     if setclipboard then pcall(function() setclipboard(text) end) end
-    if writefile then pcall(function() writefile("printer_place_within_measured_bounds_log.txt", text) end) end
+    if writefile then pcall(function() writefile("printer_place_within_measured_bounds_v2_log.txt", text) end) end
 end
 
-log("========== PLACE WITHIN MEASURED BOUNDS ==========")
+log("========== PLACE WITHIN MEASURED BOUNDS v2 ==========")
 log("Player:", player.Name)
 
 -- ---------------------------------------------------------------------------
@@ -137,23 +139,31 @@ local function getToolSize()
     return 4
 end
 
-local function countRealPrinters(folder)
-    local n = 0
+local function getRealPrinterIds(folder)
+    local ids = {}
     for _, c in ipairs(folder:GetChildren()) do
-        if c:IsA("Model") and c:GetAttribute("MoneyPrinterId") then n += 1 end
+        if c:IsA("Model") then
+            local id = c:GetAttribute("MoneyPrinterId")
+            if id then ids[id] = true end
+        end
     end
+    return ids
+end
+
+local function countRealPrintersFromIds(ids)
+    local n = 0
+    for _ in pairs(ids) do n += 1 end
     return n
 end
 
 -- ---------------------------------------------------------------------------
--- Get bounds
+-- Bounds
 -- ---------------------------------------------------------------------------
 local bounds
 if getgenv and getgenv().RoomPerimeter then
     bounds = getgenv().RoomPerimeter
     log("Using getgenv().RoomPerimeter")
 else
-    -- Fallback from measured log
     bounds = {
         minX = 997.1759033203125,
         maxX = 1010.9700927734375,
@@ -181,7 +191,7 @@ end
 log("Target folder:", folder:GetFullName())
 
 -- ---------------------------------------------------------------------------
--- Collect existing printers
+-- Collect existing printers (robust)
 -- ---------------------------------------------------------------------------
 local pickupRemote = ReplicatedStorage:FindFirstChild("__remotes", true)
 if pickupRemote then
@@ -189,39 +199,110 @@ if pickupRemote then
     if pickupRemote then pickupRemote = pickupRemote:FindFirstChild("PickupMoneyPrinter") end
 end
 
+local function tryFirePrompt(obj)
+    if not obj then return false end
+    local prompt = obj:FindFirstChildOfClass("ProximityPrompt")
+    if prompt then
+        local ok = pcall(function()
+            fireproximityprompt(prompt)
+        end)
+        if ok then return true end
+    end
+    local clicker = obj:FindFirstChildOfClass("ClickDetector")
+    if clicker then
+        local ok = pcall(function()
+            fireclickdetector(clicker)
+        end)
+        if ok then return true end
+    end
+    return false
+end
+
+local function tryRemoteCollect(model)
+    if not pickupRemote then return false end
+    for _, args in ipairs({ { model }, { model, getHrp() and getHrp().Position }, { folder, model }, {} }) do
+        local ok, res = pcall(function() return pickupRemote:InvokeServer(unpack(args)) end)
+        if ok then
+            return true
+        end
+    end
+    return false
+end
+
+local function collectPrinter(model, backpack)
+    local fullName = model:GetFullName()
+    log("  Collecting:", model.Name, "Class:", model.ClassName)
+
+    -- Try remote
+    if tryRemoteCollect(model) then
+        log("    remote ok")
+        return true
+    end
+
+    -- Try prompt/clicker on model or descendants
+    if tryFirePrompt(model) then
+        log("    prompt/click ok")
+        return true
+    end
+    for _, d in ipairs(model:GetDescendants()) do
+        if tryFirePrompt(d) then
+            log("    descendant prompt/click ok")
+            return true
+        end
+    end
+
+    -- Fallback: move Tool to backpack
+    local ok, err = pcall(function() model.Parent = backpack end)
+    if ok then
+        log("    Parent=Backpack ok")
+        return true
+    else
+        log("    Parent=Backpack failed:", tostring(err))
+    end
+
+    return false
+end
+
 local function collectAllPrinters()
     local backpack = player:FindFirstChild("Backpack")
     if not backpack then return end
-    for _, c in ipairs(folder:GetChildren()) do
-        if c.Name:lower():find("print") or c:HasTag("MoneyPrinter") then
-            log("Collecting:", c.Name)
-            local ok = false
-            if pickupRemote and pickupRemote:IsA("RemoteFunction") then
-                for _, args in ipairs({ { c }, { c, getHrp() and getHrp().Position }, { folder, c }, {} }) do
-                    local rOk, res = pcall(function() return pickupRemote:InvokeServer(unpack(args)) end)
-                    if rOk then
-                        ok = true
-                        break
-                    end
-                end
+
+    for attempt = 1, 3 do
+        local remaining = {}
+        for _, c in ipairs(folder:GetChildren()) do
+            if c.Name:lower():find("print") or c:HasTag("MoneyPrinter") then
+                table.insert(remaining, c)
             end
-            if not ok then
-                pcall(function() c.Parent = backpack end)
-            end
-            task.wait(0.2)
         end
+        if #remaining == 0 then
+            log("No printers left to collect on attempt", tostring(attempt))
+            break
+        end
+        log("Collect attempt", tostring(attempt), "printers:", tostring(#remaining))
+        for _, c in ipairs(remaining) do
+            if c.Parent == folder then
+                collectPrinter(c, backpack)
+                task.wait(0.3)
+            end
+        end
+        task.wait(0.5)
     end
 end
 
 collectAllPrinters()
-task.wait(0.5)
 
--- Delete leftover fakes
-for _, c in ipairs(folder:GetChildren()) do
-    if (c.Name:lower():find("print") or c:HasTag("MoneyPrinter")) and not c:GetAttribute("MoneyPrinterId") then
-        pcall(function() c:Destroy() end)
+-- Delete leftover fakes / uncollectable models
+local function clearFakes()
+    local deleted = 0
+    for _, c in ipairs(folder:GetChildren()) do
+        if (c.Name:lower():find("print") or c:HasTag("MoneyPrinter")) and not c:GetAttribute("MoneyPrinterId") then
+            pcall(function() c:Destroy() end)
+            deleted += 1
+        end
     end
+    log("Deleted fakes:", tostring(deleted))
 end
+clearFakes()
 
 local backpackCount = countBackpackPrinters()
 log("Backpack printers:", tostring(backpackCount))
@@ -235,27 +316,28 @@ local size = getToolSize()
 local half = size / 2
 
 -- ---------------------------------------------------------------------------
--- Choose orientation: rows along the longer side
+-- Choose orientation: rows along longer side
 -- ---------------------------------------------------------------------------
 local widthX = bounds.maxX - bounds.minX
 local widthZ = bounds.maxZ - bounds.minZ
 
 local rowDir, colDir, startX, startZ, usableRow, usableCol
+local margin = WALL_MARGIN
 if widthZ >= widthX then
     rowDir = Vector3.new(0, 0, 1)
     colDir = Vector3.new(1, 0, 0)
-    startX = bounds.minX + half
-    startZ = bounds.minZ + half
-    usableRow = widthZ - size
-    usableCol = widthX - size
+    startX = bounds.minX + margin + half
+    startZ = bounds.minZ + margin + half
+    usableRow = widthZ - size - 2 * margin
+    usableCol = widthX - size - 2 * margin
     log("Rows along Z (longer wall). Cols along X.")
 else
     rowDir = Vector3.new(1, 0, 0)
     colDir = Vector3.new(0, 0, 1)
-    startX = bounds.minX + half
-    startZ = bounds.minZ + half
-    usableRow = widthX - size
-    usableCol = widthZ - size
+    startX = bounds.minX + margin + half
+    startZ = bounds.minZ + margin + half
+    usableRow = widthX - size - 2 * margin
+    usableCol = widthZ - size - 2 * margin
     log("Rows along X (longer wall). Cols along Z.")
 end
 
@@ -268,15 +350,19 @@ local maxRows = math.max(1, math.floor(usableCol / colSpacing) + 1)
 local capacity = maxCols * maxRows
 local totalToPlace = math.min(backpackCount, capacity, MAX_PRINTERS)
 
+log("Wall margin:", tostring(margin))
 log("Usable row length:", tostring(usableRow), "max cols:", tostring(maxCols))
 log("Usable col length:", tostring(usableCol), "max rows:", tostring(maxRows))
 log("Capacity:", tostring(capacity), "Will place:", tostring(totalToPlace))
 log("Start pos:", tostring(startPos))
 
 -- ---------------------------------------------------------------------------
--- Placement
+-- Placement with per-slot ID tracking
 -- ---------------------------------------------------------------------------
-local realNow = countRealPrinters(folder)
+local knownIds = getRealPrinterIds(folder)
+local initialCount = countRealPrintersFromIds(knownIds)
+log("Initial real printers:", tostring(initialCount))
+
 local placed = 0
 local failed = 0
 local errors = {}
@@ -286,7 +372,7 @@ for i = 1, totalToPlace do
 
     local tool = takePrinterTool()
     if not tool then
-        log("No more tools")
+        log("No more tools in backpack")
         break
     end
 
@@ -294,16 +380,16 @@ for i = 1, totalToPlace do
     local row = math.floor((i - 1) / maxCols)
     local targetPos = startPos + rowDir * (col * rowSpacing) + colDir * (row * colSpacing)
 
-    -- Clamp strictly inside bounds just in case
+    -- Clamp with margin
     targetPos = Vector3.new(
-        math.clamp(targetPos.X, bounds.minX + half, bounds.maxX - half),
+        math.clamp(targetPos.X, bounds.minX + margin + half, bounds.maxX - margin - half),
         targetPos.Y,
-        math.clamp(targetPos.Z, bounds.minZ + half, bounds.maxZ - half)
+        math.clamp(targetPos.Z, bounds.minZ + margin + half, bounds.maxZ - margin - half)
     )
 
     log("Target pos:", tostring(targetPos))
 
-    local ok, success, errMsg = pcall(function()
+    local slotOk, success, errMsg = pcall(function()
         local h = getHrp()
         if h then
             h.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0))
@@ -317,35 +403,51 @@ for i = 1, totalToPlace do
             task.wait(0.3)
         end
         pcall(function() tool:Activate() end)
-        for w = 1, 30 do
+
+        -- Wait for a NEW MoneyPrinterId, not just any count increase
+        for w = 1, 45 do
             task.wait(0.2)
-            local newCount = countRealPrinters(folder)
-            if newCount > realNow then
-                realNow = newCount
+            local foundId = nil
+            for _, c in ipairs(folder:GetChildren()) do
+                if c:IsA("Model") then
+                    local id = c:GetAttribute("MoneyPrinterId")
+                    if id and not knownIds[id] then
+                        foundId = id
+                        break
+                    end
+                end
+            end
+            if foundId then
+                knownIds[foundId] = true
                 return true
             end
         end
         return false, "conversion timeout"
     end)
 
-    if ok and success == true then
+    if slotOk and success == true then
         placed += 1
-        log("OK. Real printers:", tostring(realNow))
+        log("OK. Confirmed real printers:", tostring(countRealPrintersFromIds(knownIds)))
     else
         failed += 1
-        local msg = tostring((ok and errMsg) or success or "unknown")
+        local msg = tostring((slotOk and errMsg) or success or "unknown")
         log("FAILED:", msg)
         table.insert(errors, { slot = i, pos = tostring(targetPos), error = msg })
-        pcall(function() tool.Parent = player.Backpack end)
+        -- If tool still exists and is not destroyed, return to backpack
+        pcall(function()
+            if tool and tool.Parent then tool.Parent = player.Backpack end
+        end)
     end
 
     task.wait(0.1)
 end
 
+local finalCount = countRealPrintersFromIds(knownIds)
 log("\n--- RESULTS ---")
-log("Placed:", tostring(placed))
+log("Initial real printers:", tostring(initialCount))
+log("Placed (confirmed by new IDs):", tostring(placed))
 log("Failed:", tostring(failed))
-log("Final real printers:", tostring(countRealPrinters(folder)))
+log("Final real printers:", tostring(finalCount))
 log("Remaining backpack:", tostring(countBackpackPrinters()))
 if #errors > 0 then
     log("Errors:", tostring(#errors))
