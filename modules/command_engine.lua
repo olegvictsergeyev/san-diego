@@ -1534,7 +1534,7 @@ end
 local function getPrinterPlacementInfo(folder)
 	local existing = {}
 	local positions = {}
-	local orientationCF = CFrame.new()
+	local partSize = nil
 	local floorLocalY = nil
 	local regionCF, regionSize
 	for _, c in ipairs(folder:GetChildren()) do
@@ -1543,7 +1543,11 @@ local function getPrinterPlacementInfo(folder)
 			local part = c:FindFirstChild("Printer_d") or c:FindFirstChild("Handle")
 			if part and part:IsA("BasePart") then
 				table.insert(positions, part.Position)
-				orientationCF = part.CFrame - part.CFrame.Position
+				partSize = part.Size
+				if typeof(regionCF) == "CFrame" then
+					local lp = regionCF:PointToObjectSpace(part.Position)
+					floorLocalY = lp.Y
+				end
 			end
 			local rc = c:GetAttribute("MoneyPrinterApartmentRegionCFrame")
 			local rs = c:GetAttribute("MoneyPrinterApartmentRegionSize")
@@ -1557,6 +1561,26 @@ local function getPrinterPlacementInfo(folder)
 			end
 		end
 	end
+	-- Fallback: search folder ancestors for region attributes (empty apartment)
+	if typeof(regionCF) ~= "CFrame" then
+		local p = folder.Parent
+		while p do
+			local rc = p:GetAttribute("MoneyPrinterApartmentRegionCFrame")
+			local rs = p:GetAttribute("MoneyPrinterApartmentRegionSize")
+			if typeof(rc) == "CFrame" and typeof(rs) == "Vector3" then
+				regionCF = rc
+				regionSize = rs
+				break
+			end
+			p = p.Parent
+		end
+	end
+	local orientationCF
+	if typeof(regionCF) == "CFrame" then
+		orientationCF = regionCF - regionCF.Position
+	else
+		orientationCF = CFrame.new()
+	end
 	return {
 		folder = folder,
 		existing = existing,
@@ -1564,6 +1588,7 @@ local function getPrinterPlacementInfo(folder)
 		regionCF = regionCF,
 		regionSize = regionSize,
 		floorLocalY = floorLocalY,
+		partSize = partSize,
 		orientationCF = orientationCF,
 	}
 end
@@ -1605,67 +1630,72 @@ local function inferGridSpacing(info)
 	return spacing
 end
 
-local function generateSlotsInRegion(info, maxCount)
+local function generateSlotsInRegion(info, playerPos, maxCount)
 	if typeof(info.regionCF) ~= "CFrame" or typeof(info.regionSize) ~= "Vector3" or not info.floorLocalY then
 		return nil, "no region attributes on existing printers"
 	end
-	local spacing = inferGridSpacing(info)
+	local size = info.partSize or Vector3.new(4, 4, 4)
+	local spacing = math.max(size.X, size.Z)
+	local margin = spacing
 	local half = info.regionSize / 2
-	local margin = math.max(spacing * 0.6, 3)
 	local minX = -half.X + margin
 	local maxX = half.X - margin
 	local minZ = -half.Z + margin
 	local maxZ = half.Z - margin
+	if minX > maxX then minX, maxX = maxX, minX end
+	if minZ > maxZ then minZ, maxZ = maxZ, minZ end
+	if minX >= maxX or minZ >= maxZ then
+		margin = math.min(half.X, half.Z) - 0.5
+		minX = -half.X + margin
+		maxX = half.X - margin
+		minZ = -half.Z + margin
+		maxZ = half.Z - margin
+	end
+	if minX >= maxX or minZ >= maxZ then
+		return nil, "region too small for printer size"
+	end
+
+	local playerLocal = info.regionCF:PointToObjectSpace(playerPos)
+	local startX = playerLocal.X < 0 and minX or maxX
+	local stepX = playerLocal.X < 0 and spacing or -spacing
+	local startZ = playerLocal.Z < 0 and minZ or maxZ
+	local stepZ = playerLocal.Z < 0 and spacing or -spacing
 
 	local occupied = {}
 	local function key(x, z)
 		return tostring(math.round(x / (spacing / 2))) .. "," .. tostring(math.round(z / (spacing / 2)))
 	end
-	local existingLocals = {}
 	for _, pos in ipairs(info.positions) do
 		local lp = info.regionCF:PointToObjectSpace(pos)
-		table.insert(existingLocals, lp)
 		occupied[key(lp.X, lp.Z)] = true
 	end
 
-	local originLocal = Vector3.new(0, info.floorLocalY, 0)
-
-	local candidates = {}
-	local maxOffset = math.max(
-		math.floor((maxX - minX) / spacing),
-		math.floor((maxZ - minZ) / spacing)
-	) + 2
-	for i = -maxOffset, maxOffset do
-		for j = -maxOffset, maxOffset do
-			local lx = originLocal.X + j * spacing
-			local lz = originLocal.Z + i * spacing
-			if lx < minX or lx > maxX or lz < minZ or lz > maxZ then continue end
-			local k = key(lx, lz)
-			if occupied[k] then continue end
-			local worldPos = info.regionCF:PointToWorldSpace(Vector3.new(lx, info.floorLocalY, lz))
-			local nearestDist = math.huge
-			for _, lp in ipairs(existingLocals) do
-				local d = math.sqrt((lp.X - lx) ^ 2 + (lp.Z - lz) ^ 2)
-				if d < nearestDist then nearestDist = d end
-			end
-			if nearestDist < spacing * 0.8 then continue end
-			local centerDist = math.sqrt(lx * lx + lz * lz)
-			table.insert(candidates, { pos = worldPos, localPos = Vector3.new(lx, info.floorLocalY, lz), centerDist = centerDist, nearestDist = nearestDist })
-		end
-	end
-
-	table.sort(candidates, function(a, b) return a.centerDist < b.centerDist end)
-
 	local slots = {}
-	local used = {}
-	for _, c in ipairs(candidates) do
-		if #slots >= maxCount then break end
-		local k = key(c.localPos.X, c.localPos.Z)
-		if not used[k] then
-			used[k] = true
-			table.insert(slots, c.pos)
+	local function addSlot(lx, lz)
+		if #slots >= maxCount then return end
+		local k = key(lx, lz)
+		if occupied[k] then return end
+		for _, pos in ipairs(info.positions) do
+			local lp = info.regionCF:PointToObjectSpace(pos)
+			local d = math.sqrt((lp.X - lx) ^ 2 + (lp.Z - lz) ^ 2)
+			if d < spacing * 0.8 then return end
 		end
+		local worldPos = info.regionCF:PointToWorldSpace(Vector3.new(lx, info.floorLocalY, lz))
+		table.insert(slots, worldPos)
 	end
+
+	local z = startZ
+	while (stepZ > 0 and z <= maxZ) or (stepZ < 0 and z >= minZ) do
+		local x = startX
+		while (stepX > 0 and x <= maxX) or (stepX < 0 and x >= minX) do
+			addSlot(x, z)
+			if #slots >= maxCount then break end
+			x += stepX
+		end
+		if #slots >= maxCount then break end
+		z += stepZ
+	end
+
 	return slots, nil, spacing
 end
 
@@ -1809,7 +1839,7 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 	local existingCount = #info.existing
 	local targetCount = math.min(existingCount + startBackpackCount, maxTotal)
 	local neededSlots = targetCount - existingCount
-	local slots, err, spacing = generateSlotsInRegion(info, neededSlots)
+	local slots, err, spacing = generateSlotsInRegion(info, playerPos, neededSlots)
 	if not slots then
 		return { success = false, error = "Could not generate slots: " .. tostring(err) }
 	end
