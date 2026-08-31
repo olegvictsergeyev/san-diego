@@ -104,6 +104,59 @@ if apartments then
     deepScan(apartments, 0)
 end
 
+-- Scan all services for region attributes
+log("\nScanning all services for MoneyPrinterApartmentRegionCFrame:")
+local servicesToScan = {
+    "Workspace",
+    "ReplicatedStorage",
+    "ReplicatedFirst",
+    "ServerScriptService",
+    "ServerStorage",
+    "Lighting",
+    "StarterGui",
+    "StarterPack",
+    "StarterPlayer",
+}
+for _, serviceName in ipairs(servicesToScan) do
+    local ok, service = pcall(function() return game:GetService(serviceName) end)
+    if ok and service then
+        local foundAny = false
+        local function deepScan(parent, depth)
+            if depth > 12 then return end
+            for _, c in ipairs(parent:GetChildren()) do
+                if dumpRegionAttrs(c) then
+                    log("  Service", serviceName, "->", c.ClassName, c:GetFullName())
+                    foundAny = true
+                end
+                deepScan(c, depth + 1)
+            end
+        end
+        deepScan(service, 0)
+        if not foundAny then
+            log("  Service", serviceName, ": none")
+        end
+    end
+end
+
+-- Inspect backpack tool attributes
+log("\nInspecting backpack tools:")
+local backpack = player:FindFirstChild("Backpack")
+if backpack then
+    for _, c in ipairs(backpack:GetChildren()) do
+        if c.Name:lower():find("print") then
+            log("  Backpack tool:", c.ClassName, c.Name)
+            log("    has MoneyPrinterId:", tostring(typeof(c:GetAttribute("MoneyPrinterId")) == "string"))
+            log("    has region attrs:", tostring(dumpRegionAttrs(c)))
+            local part = c:FindFirstChild("Handle") or c:FindFirstChild("Printer_d")
+            if part and part:IsA("BasePart") then
+                log("    part Size:", tostring(part.Size))
+            end
+        end
+    end
+else
+    log("  No backpack")
+end
+
 -- Print player current position and nearest MoneyPrinters folder
 local char = player.Character or player.CharacterAdded:Wait()
 local hrp = char:FindFirstChild("HumanoidRootPart")
