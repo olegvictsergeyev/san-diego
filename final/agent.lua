@@ -76,6 +76,8 @@ if not markerOk then
 end
 
 local marker = markerErr
+local BASE_URL = getgenv().SanDiegoAgentBaseUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main"
+local UI_PANEL_URL = BASE_URL .. "/modules/ui_panel.lua?nocache=" .. tostring(tick())
 log("INFO", "step 4/5: loading ui_panel from", UI_PANEL_URL)
 
 local function loadUiPanel()
