@@ -875,20 +875,39 @@ function CommandEngine:_chasePlayer(player, options)
     local threshold = tonumber(options.threshold) or 10
     local heightThreshold = tonumber(options.heightThreshold) or 5
     local maxStep = tonumber(options.maxStep) or 100
+    local maxVerticalStep = tonumber(options.maxVerticalStep) or 8
+    local dieOnReach = options.dieOnReach == true
+    local dieDelay = tonumber(options.dieDelay) or 0.3
 
     local function tryTeleportToTarget(targetHrp)
         local hrp = self:_getHrp()
         if not hrp then
             return false
         end
+
+        local targetPos = targetHrp.Position
+        local currentY = hrp.Position.Y
+        local groundY = self:_getGroundY(targetPos)
+
+        -- Не прыгаем слишком резко по высоте
+        local destY = currentY
+        local dyToGround = groundY - currentY
+        if math.abs(dyToGround) <= maxVerticalStep then
+            destY = groundY
+        elseif dyToGround > 0 then
+            destY = currentY + maxVerticalStep
+        else
+            destY = currentY - maxVerticalStep
+        end
+
+        -- Не телепортируемся, если сами в воздухе
+        if not self:_isGrounded(hrp) then
+            return false
+        end
+
         local ok = pcall(function()
-            -- Не меняем высоту при близком телепорте, чтобы персонаж не оказался
-            -- в воздухе и не разбился при падении с крыши/возвышенности.
-            -- Выравниваем только по X/Z, высоту подбираем отдельно.
-            local currentY = hrp.Position.Y
-            local targetPos = targetHrp.Position
             local _, yaw = hrp.CFrame:ToEulerAnglesYXZ()
-            hrp.CFrame = CFrame.new(Vector3.new(targetPos.X, currentY, targetPos.Z)) * CFrame.Angles(0, yaw, 0)
+            hrp.CFrame = CFrame.new(Vector3.new(targetPos.X, destY, targetPos.Z)) * CFrame.Angles(0, yaw, 0)
             hrp.AssemblyLinearVelocity = Vector3.zero
         end)
         return ok
@@ -911,40 +930,63 @@ function CommandEngine:_chasePlayer(player, options)
             local dist2d = math.sqrt((tPos.X - lPos.X) ^ 2 + (tPos.Z - lPos.Z) ^ 2)
             local dy = math.abs(tPos.Y - lPos.Y)
 
+            -- === ЦЕЛЬ ДОСТИГНУТА ===
             if dist2d < threshold and dy < heightThreshold then
+                if dieOnReach then
+                    task.wait(dieDelay)
+                    local killed = self:_killCharacter()
+                    return {
+                        success = true,
+                        data = {
+                            distance = dist2d,
+                            heightDiff = dy,
+                            killed = killed
+                        }
+                    }
+                end
                 return { success = true, data = { distance = dist2d, heightDiff = dy } }
             end
 
-            -- Если уже близко — телепортируемся горизонтально к цели, сохраняя высоту.
-            if dist2d < 25 and dy < 15 then
+            -- Если падаем — ждём, не даём новых команд
+            local state = self:_getHumanoidState()
+            if state == Enum.HumanoidStateType.Freefall or state == Enum.HumanoidStateType.FallingDown then
+                task.wait(0.1)
+                continue
+            end
+
+            -- Телепортируемся только если очень близко И рядом по высоте
+            if dist2d < 12 and dy < heightThreshold * 2 then
                 if not tryTeleportToTarget(targetHrp) then
                     warn("[SanDiegoAgent][CommandEngine] close teleport failed")
                 end
             else
-                -- Двигаемся к цели короткими сегментами, чтобы успевать за убегающими и не тратить минуты на дальние дистанции.
+                -- Горизонтальное движение короткими шагами
                 local dx2d = tPos.X - lPos.X
                 local dz2d = tPos.Z - lPos.Z
                 local stepRatio = dist2d > 0 and math.min(1, maxStep / dist2d) or 0
                 local destX = math.round(lPos.X + dx2d * stepRatio)
                 local destZ = math.round(lPos.Z + dz2d * stepRatio)
 
-                local moveResult = self:_moveTo({ x = destX, z = destZ, speed = 10 })
-                if not moveResult.success then
-                    warn("[SanDiegoAgent][CommandEngine] chase horizontal move failed:", tostring(moveResult.error))
-                    return { success = false, error = "chase horizontal move failed: " .. tostring(moveResult.error) }
+                -- Не идём, если под точкой назначения пропасть
+                local destGroundY = self:_getGroundY(Vector3.new(destX, lPos.Y, destZ))
+                if math.abs(destGroundY - lPos.Y) > maxVerticalStep * 2 then
+                    warn("[SanDiegoAgent][CommandEngine] destination unsafe, skipping horizontal move")
+                else
+                    local moveResult = self:_moveTo({ x = destX, z = destZ, speed = 10 })
+                    if not moveResult.success then
+                        warn("[SanDiegoAgent][CommandEngine] chase horizontal move failed:", tostring(moveResult.error))
+                        return { success = false, error = "chase horizontal move failed: " .. tostring(moveResult.error) }
+                    end
                 end
             end
 
-            -- Корректируем высоту (крыши, этажи), но не более чем на maxStep за раз.
-            -- Используем актуальную позицию цели, так как она могла смениться.
+            -- Вертикальная коррекция — только маленькими шагами
             local newHrp = self:_getHrp()
             local newTargetHrp = self:_getPlayerHrp(player)
             if newHrp and newTargetHrp then
-                local newY = newHrp.Position.Y
-                local targetY = newTargetHrp.Position.Y
-                local dyNow = targetY - newY
+                local dyNow = newTargetHrp.Position.Y - newHrp.Position.Y
                 if math.abs(dyNow) > 0.5 then
-                    local yValue = math.clamp(math.round(dyNow), -maxStep, maxStep)
+                    local yValue = math.clamp(math.round(dyNow), -maxVerticalStep, maxVerticalStep)
                     local yResult = self:_moveAxis("y", { value = yValue, speed = 10 })
                     if not yResult.success then
                         warn("[SanDiegoAgent][CommandEngine] chase vertical move failed:", tostring(yResult.error))
@@ -1082,13 +1124,24 @@ function CommandEngine:_transferMoneyViaRespawn(payload)
 			}
 		end
 
-		-- Перед смертью всегда подбегаем к цели, чтобы деньги упали рядом.
-		local chaseResult = self:_chasePlayer(targetPlayer, { timeout = 10, threshold = 1, heightThreshold = 1 })
+		-- Перед смертью подбегаем к цели. Если не достигли — НЕ убиваем, итерация не считается за respawn.
+		local chaseResult = self:_chasePlayer(targetPlayer, {
+			timeout = 10,
+			threshold = 1,
+			heightThreshold = 1,
+			dieOnReach = true,
+			dieDelay = 0.3,
+		})
+
 		if not chaseResult.success then
 			warn("[SanDiegoAgent][CommandEngine] failed to reach target before respawn:", tostring(chaseResult.error))
+			attempts += 1  -- считаем попытку, чтобы не зависнуть навечно
+			task.wait(2)
+			continue
 		end
 
-		-- Ещё раз проверяем баланс после подхода: может, цель уже достигнута.
+		-- chaseResult.success == true и персонаж уже мёртв (убит внутри _chasePlayer)
+		-- Проверяем баланс после смерти.
 		balance = self:_getPlayerBalanceFromReplicatedStats(targetPlayer)
 		lastBalance = balance
 		if balance and balance >= amount then
@@ -1102,15 +1155,6 @@ function CommandEngine:_transferMoneyViaRespawn(payload)
 					target_amount = amount,
 				},
 			}
-		end
-
-		-- Убиваем локального персонажа, чтобы он дропнул деньги.
-		local humanoid = self:_getHumanoid()
-		if humanoid and humanoid.Health > 0 then
-			if self:_isCancelled() then
-				return { success = false, error = "cancelled" }
-			end
-			humanoid.Health = 0
 		end
 
 		attempts += 1
@@ -1163,6 +1207,39 @@ function CommandEngine:_transferMoneyViaRespawn(payload)
 			target_amount = amount,
 		},
 	}
+end
+
+function CommandEngine:_isGrounded(hrp)
+    local rp = RaycastParams.new()
+    rp.FilterDescendantsInstances = { hrp.Parent }
+    rp.FilterType = Enum.RaycastFilterType.Blacklist
+    return workspace:Raycast(hrp.Position, Vector3.new(0, -6, 0), rp) ~= nil
+end
+
+function CommandEngine:_getGroundY(pos, ignoreModel)
+    local rp = RaycastParams.new()
+    rp.FilterDescendantsInstances = { ignoreModel or self:_getHrp().Parent }
+    rp.FilterType = Enum.RaycastFilterType.Blacklist
+    local r = workspace:Raycast(Vector3.new(pos.X, pos.Y + 10, pos.Z), Vector3.new(0, -1000, 0), rp)
+    return r and r.Position.Y or pos.Y
+end
+
+function CommandEngine:_getHumanoidState()
+    local hrp = self:_getHrp()
+    if not hrp then return nil end
+    local hum = hrp.Parent:FindFirstChildOfClass("Humanoid")
+    return hum and hum:GetState() or nil
+end
+
+function CommandEngine:_killCharacter()
+    local hrp = self:_getHrp()
+    if not hrp then return false end
+    local hum = hrp.Parent:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.Health = 0
+        return true
+    end
+    return false
 end
 
 function CommandEngine:_respawnForMoney(payload)
@@ -1220,35 +1297,33 @@ function CommandEngine:_respawnForMoney(payload)
 		}
 	end
 
-	-- Всегда подбегаем к цели перед смертью.
-	local chaseResult = self:_chasePlayer(targetPlayer, { timeout = 10, threshold = 1, heightThreshold = 1 })
+	-- Подбегаем к цели и умираем только если достигли.
+	local chaseResult = self:_chasePlayer(targetPlayer, {
+		timeout = 10,
+		threshold = 1,
+		heightThreshold = 1,
+		dieOnReach = true,
+		dieDelay = 0.3,
+	})
+
 	if not chaseResult.success then
 		warn("[SanDiegoAgent][CommandEngine] failed to reach target before respawn:", tostring(chaseResult.error))
-	end
-
-	local afterMoveBalance = self:_getPlayerBalanceFromReplicatedStats(targetPlayer)
-	if afterMoveBalance and afterMoveBalance >= amount then
 		return {
-			success = true,
+			success = false,
+			error = "failed to reach target: " .. tostring(chaseResult.error),
 			data = {
 				target_user_id = targetPlayer.UserId,
 				target_name = targetPlayer.Name,
 				respawned = false,
-				reached = true,
+				reached = false,
 				before_balance = beforeBalance,
-				after_balance = afterMoveBalance,
+				after_balance = beforeBalance,
 				target_amount = amount,
 			},
 		}
 	end
 
-	local humanoid = self:_getHumanoid()
-	if humanoid and humanoid.Health > 0 then
-		if self:_isCancelled() then
-			return { success = false, error = "cancelled" }
-		end
-		humanoid.Health = 0
-	end
+	-- Персонаж уже умер внутри _chasePlayer. Ждём возрождения.
 
 	local added = false
 	local conn
