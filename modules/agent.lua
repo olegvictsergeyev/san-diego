@@ -100,11 +100,17 @@ function Agent:_sendStatus(force)
 	end
 	if typeof(snapshot.custom_data) == "table" then
 		local cd = {}
+		-- Пока выполняется команда, персонаж движется и position_x/z меняются
+		-- постоянно — позиционные отправки превращаются в спам. Позиционные
+		-- оси исключаем из сравнения на время команды: одна отправка с финальной
+		-- позицией происходит по завершении команды (force-send после смены
+		-- current_command на idle). time_* тикают каждую секунду, position_y
+		-- шумит (прыжки AFK, неровности) — исключены всегда.
+		local commandActive = self.currentCommand ~= nil
 		for k, v in pairs(snapshot.custom_data) do
-			-- time_* тикают каждую секунду, position_y шумит (прыжки AFK,
-			-- неровности) — ни то ни другое не должно триггерить отправку.
 			if k ~= "time_1" and k ~= "time_2" and k ~= "time_3" and k ~= "time_4" and k ~= "time_5"
-				and k ~= "position_y" then
+				and k ~= "position_y"
+				and not (commandActive and (k == "position_x" or k == "position_z")) then
 				cd[k] = v
 			end
 		end
