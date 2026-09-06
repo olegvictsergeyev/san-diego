@@ -25,6 +25,10 @@ Vehicles.DT = 0.05
 -- езды (команда drive) — ровная линия, проверенная на 7000+ стадах
 Vehicles.DEFAULT_LANE_Z = 150.07
 Vehicles.MAX_DRIVE_DIST = 20000
+-- Анти-чит: при реальной скорости ~613+ ст/с сервер качнул технику,
+-- обнулил скорость и откатил на точку нарушения (rewind).
+-- Кап = предел −5%: разгон до 580 и держим, не выше.
+Vehicles.DRIVE_VMAX = 580
 
 function Vehicles.new()
 	local self = setmetatable({}, Vehicles)
@@ -486,7 +490,7 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 			end
 		end
 		if phase == "accel" then
-			v = math.min(v + ACCEL * self.DT, 1000)
+			v = math.min(v + ACCEL * self.DT, self.DRIVE_VMAX)
 			if not t300 and v >= 300 then
 				t300 = tick() - t0
 			end
