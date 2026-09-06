@@ -190,6 +190,14 @@ POST /commands/{id}/status
       }
     },
     {
+      "name": "pickup_printer",
+      "params": {
+        "printer_id": { "type": "string", "min": 1, "max": 64 },
+        "floating": { "type": "boolean" },
+        "max_count": { "type": "number", "min": 1, "max": 50 }
+      }
+    },
+    {
       "name": "jump",
       "params": {}
     },

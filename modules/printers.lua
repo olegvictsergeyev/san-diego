@@ -43,6 +43,13 @@ Printers.GRID_STEP = 1.4
 -- Отступ первой ячейки от грани (половина габарита + запас от стены).
 Printers.GRID_EDGE_MARGIN = 1.05
 
+-- Подбор принтера: клиент вызывает RemoteFunction с ЭКЗЕМПЛЯРОМ модели
+-- (InvokeServer(id) сервер отклоняет, InvokeServer(model) — принимает;
+-- проверено на живом сервере). Персонажа подводим ближе к точке промпта —
+-- сервер может валидировать дистанцию.
+Printers.PICKUP_REMOTE_PATH = "__remotes.MoneyPrinterService.PickupMoneyPrinter"
+Printers.PICKUP_CONFIRM_TIMEOUT = 5
+
 function Printers.new()
 	local self = setmetatable({}, Printers)
 	return self
@@ -589,6 +596,131 @@ function Printers:placeGrid(maxTotal, isCancelled)
 		existing = startPlaced,
 		room_total = self:countPlaced(room),
 		cells = #cells,
+	}
+end
+
+-- Находит RemoteFunction подбора по пути из конфига.
+function Printers:_pickupRemote()
+	local node = game:GetService("ReplicatedStorage")
+	for part in self.PICKUP_REMOTE_PATH:gmatch("[^%.]+") do
+		node = node and node:FindFirstChild(part)
+	end
+	return node
+end
+
+-- Подбирает один принтер (модель из папки MoneyPrinters комнаты).
+-- Подводит персонажа к точке промпта, вызывает RemoteFunction с моделью,
+-- ждёт исчезновения модели из папки.
+function Printers:_pickupOne(model, isCancelled)
+	if not (model and model.Parent) then
+		return { success = false, error = "model is gone" }
+	end
+	local remote = self:_pickupRemote()
+	if not remote then
+		return { success = false, error = "pickup remote not found" }
+	end
+	-- встаём рядом с точкой промпта (2.5 ст по горизонтали — дистанция
+	-- промпта 8 ст, дальше античит на микротелепортах не сработает)
+	local prompt = model:FindFirstChild("MoneyPrinterPickupPrompt", true)
+	local wp = prompt and prompt.Parent and prompt.Parent.WorldPosition
+	if wp then
+		local cf = model:GetBoundingBox()
+		local flat = Vector3.new(wp.X - cf.Position.X, 0, wp.Z - cf.Position.Z)
+		if flat.Magnitude < 0.01 then
+			flat = Vector3.new(1, 0, 0)
+		end
+		local charPos = Vector3.new(wp.X, 0, wp.Z) - flat.Unit * 2.5
+		self:_positionCharacter(charPos.X, charPos.Z, flat.Unit)
+	end
+	local ok, res = pcall(function()
+		return remote:InvokeServer(model)
+	end)
+	if not ok then
+		return { success = false, error = "pickup invoke failed: " .. tostring(res) }
+	end
+	local t0 = tick()
+	while tick() - t0 < self.PICKUP_CONFIRM_TIMEOUT do
+		if isCancelled and isCancelled() then
+			return { success = false, error = "cancelled" }
+		end
+		task.wait(0.1)
+		if not model.Parent then
+			return { success = true }
+		end
+	end
+	return { success = false, error = "pickup not confirmed (res=" .. tostring(res) .. ")" }
+end
+
+-- Подбирает принтеры комнаты. Фильтры:
+--   opts.printer_id — конкретный принтер по MoneyPrinterId;
+--   opts.floating   — только «плавающие» (дно выше пола комнаты > 1.5 ст,
+--                     например те, что встали на шкаф вместо пола);
+--   opts.max_count  — не больше столько штук.
+-- Без printer_id и floating=true возвращает ошибку (защита от сбора всего).
+function Printers:pickupPrinters(opts, isCancelled)
+	opts = opts or {}
+	local room, err = self:detectRoom()
+	if not room then
+		return { success = false, error = err }
+	end
+	if not room.folder then
+		return { success = false, error = "MoneyPrinters folder not found in room" }
+	end
+	local player = self:_player()
+	if room.ownerUserId and room.ownerUserId ~= player.UserId then
+		return { success = false, error = "room is owned by another player (ApartmentOwnerUserId=" .. tostring(room.ownerUserId) .. ")" }
+	end
+	if not opts.printer_id and not opts.floating then
+		return { success = false, error = "specify printer_id or floating=true" }
+	end
+
+	local b = self:_interiorBounds(room.region)
+	local maxCount = math.clamp(tonumber(opts.max_count) or self.MAX_BUY, 1, self.MAX_BUY)
+	local targets = {}
+	for _, c in ipairs(room.folder:GetChildren()) do
+		local id = c:GetAttribute("MoneyPrinterId")
+		if id then
+			local match = false
+			if opts.printer_id then
+				match = (id == opts.printer_id)
+			elseif opts.floating then
+				local cf, size = c:GetBoundingBox()
+				match = (cf.Position.Y - size.Y / 2) > b.floorY + 1.5
+			end
+			if match then
+				table.insert(targets, c)
+			end
+		end
+		if #targets >= maxCount then
+			break
+		end
+	end
+	if #targets == 0 then
+		return { success = false, error = "no matching printers found" }
+	end
+
+	local picked = 0
+	local failed = 0
+	for _, model in ipairs(targets) do
+		if isCancelled and isCancelled() then
+			return { success = false, error = "cancelled", picked = picked, failed = failed }
+		end
+		local res = self:_pickupOne(model, isCancelled)
+		if res.success then
+			picked = picked + 1
+		else
+			failed = failed + 1
+			if res.error == "cancelled" then
+				return { success = false, error = "cancelled", picked = picked, failed = failed }
+			end
+		end
+	end
+	return {
+		success = picked > 0,
+		picked = picked,
+		failed = failed,
+		inventory = self:countInventory(),
+		room_total = self:countPlaced(room),
 	}
 end
 

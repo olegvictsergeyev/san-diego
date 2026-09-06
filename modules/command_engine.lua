@@ -364,6 +364,31 @@ function CommandEngine:getCommandsSpec()
 			params = {},
 		},
 		{
+			name = "pickup_printer",
+			description = "Подобрать расставленные Money Printer обратно в инвентарь. Работает в своей комнате. Нужен фильтр: либо printer_id (MoneyPrinterId модели), либо floating=true — только «плавающие» принтеры (вставшие не на пол, например на шкаф). Каждый подбор верифицируется по исчезновению модели",
+			params = {
+				printer_id = {
+					type = "string",
+					required = false,
+					min = 1,
+					max = 64,
+					description = "MoneyPrinterId конкретного принтера (опционально, вместо floating)",
+				},
+				floating = {
+					type = "boolean",
+					required = false,
+					description = "Подбирать только «плавающие» принтеры (дно выше пола комнаты > 1.5 ст)",
+				},
+				max_count = {
+					type = "integer",
+					required = false,
+					min = 1,
+					max = 50,
+					description = "Максимум принтеров для подбора (по умолчанию 50)",
+				},
+			},
+		},
+		{
 			name = "buy_printer",
 			description = "Купить N Money Printer у витрины. Требует стоять у витрины (prompt в зоне досягаемости). Покупка выполняется прямым вводом в ProximityPrompt (без эмуляции клавиш), каждая покупка верифицируется по фактическому приросту числа принтеров; при нехватке денег команда останавливается и возвращает сколько куплено",
 			params = {
@@ -1535,6 +1560,32 @@ function CommandEngine:_placeAllPrintersCommand(payload)
 	return { success = true, data = res }
 end
 
+function CommandEngine:_pickupPrinterCommand(payload)
+	if not self.printers then
+		return { success = false, error = "printers module unavailable" }
+	end
+	payload = payload or {}
+	if typeof(payload.printer_id) ~= "string" or #payload.printer_id == 0 then
+		payload.printer_id = nil
+	end
+	local ok, res = pcall(function()
+		return self.printers:pickupPrinters({
+			printer_id = payload.printer_id,
+			floating = payload.floating == true,
+			max_count = payload.max_count,
+		}, function()
+			return self:_isCancelled()
+		end)
+	end)
+	if not ok then
+		return { success = false, error = tostring(res) }
+	end
+	if not res.success then
+		return { success = false, error = res.error, data = { picked = res.picked, failed = res.failed } }
+	end
+	return { success = true, data = res }
+end
+
 function CommandEngine:_jumpCommand()
 	local humanoid = self:_getHumanoid()
 	if not humanoid then
@@ -2553,6 +2604,8 @@ function CommandEngine:execute(command)
 		result = self:_getInventoryCommand()
 	elseif name == "buy_printer" then
 		result = self:_buyPrinterCommand(payload)
+	elseif name == "pickup_printer" then
+		result = self:_pickupPrinterCommand(payload)
 	elseif name == "jump" then
 		result = self:_jumpCommand()
 	elseif name == "hold_key" then
