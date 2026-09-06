@@ -456,6 +456,26 @@ function CommandEngine:getCommandsSpec()
 			params = {},
 		},
 		{
+			name = "drive",
+			description = "Наземная езда на полной скорости (мотоцикл/машина). x — смещение по оси X со знаком направления в стадах (±20000); разгон без ограничения скорости (физически ~630 ст/с на мотоцикле), торможение резкое с остановкой у цели. z — абсолютная координата полосы (по умолчанию 150.07 — главный проспект); если z не передан — машина быстро выравнивается на эту полосу и придерживается её всю дистанцию. Если x не передан (0) — только встать в полосу z, не уезжая. При встрече невидимых стен полоса смещается; если свободной полосы нет — торможение и ошибка blocked. Требует сидеть в транспорте",
+			params = {
+				x = {
+					type = "integer",
+					required = false,
+					min = -20000,
+					max = 20000,
+					description = "Смещение по X в стадах со знаком (0 или отсутствует = не уезжать, только встать в полосу z)",
+				},
+				z = {
+					type = "number",
+					required = false,
+					min = -20000,
+					max = 20000,
+					description = "Абсолютная координата полосы z (по умолчанию 150.07 — главный проспект San Diego)",
+				},
+			},
+		},
+		{
 			name = "update_agent",
 			description = "Обновить агента до актуальной версии: штатная остановка и перезапуск загрузчика с GitHub",
 			params = {
@@ -1675,6 +1695,32 @@ function CommandEngine:_navCarCommand(payload)
 	return { success = true, data = res.data }
 end
 
+function CommandEngine:_driveCommand(payload)
+	if not self.vehicles then
+		return { success = false, error = "vehicles module unavailable" }
+	end
+	payload = payload or {}
+	local x, z = payload.x, payload.z
+	if x ~= nil and (typeof(x) ~= "number" or x % 1 ~= 0 or x < -20000 or x > 20000) then
+		return { success = false, error = "x must be an integer in [-20000, 20000]" }
+	end
+	if z ~= nil and (typeof(z) ~= "number" or z < -20000 or z > 20000) then
+		return { success = false, error = "z must be a number in [-20000, 20000]" }
+	end
+	local ok, res = pcall(function()
+		return self.vehicles:drive(x, z, function()
+			return self:_isCancelled()
+		end)
+	end)
+	if not ok then
+		return { success = false, error = tostring(res) }
+	end
+	if not res.success then
+		return { success = false, error = res.error, data = res.data }
+	end
+	return { success = true, data = res.data }
+end
+
 function CommandEngine:_jumpCommand()
 	local humanoid = self:_getHumanoid()
 	if not humanoid then
@@ -2699,6 +2745,8 @@ function CommandEngine:execute(command)
 		result = self:_flyCarCommand(payload)
 	elseif name == "nav_car" then
 		result = self:_navCarCommand(payload)
+	elseif name == "drive" then
+		result = self:_driveCommand(payload)
 	elseif name == "jump" then
 		result = self:_jumpCommand()
 	elseif name == "hold_key" then

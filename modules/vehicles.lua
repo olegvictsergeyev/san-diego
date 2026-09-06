@@ -21,6 +21,10 @@ Vehicles.HOVER_STEP = 1
 Vehicles.NAV_SPEED = 20
 Vehicles.MAX_DIST = 2000
 Vehicles.DT = 0.05
+-- Главный проспект карты San Diego: полоса по умолчанию для наземной
+-- езды (команда drive) — ровная линия, проверенная на 7000+ стадах
+Vehicles.DEFAULT_LANE_Z = 150.07
+Vehicles.MAX_DRIVE_DIST = 20000
 
 function Vehicles.new()
 	local self = setmetatable({}, Vehicles)
@@ -320,6 +324,181 @@ function Vehicles:navigate(dx, dz, isCancelled)
 	-- высота в nav не менялась — посадка не нужна, просто снимаем констрейнты
 	self:_teardown()
 	return { success = true, data = { landed = true, travelled = math.floor(travelled), knocks = knocks } }
+end
+
+-- Наземная езда на полной скорости (мотоцикл/машина). Профиль проверен
+-- на живых заездах: разгон без потолка (команда 60 ст/с², физически
+-- достижимо ~630 ст/с на мотоцикле), полоса z держится P-регулятором,
+-- торможение 80 ст/с² (реальное ~65) с точной остановкой у цели,
+-- активная остановка в конце (техника сохраняет импульс и катится сама,
+-- если просто снять констрейнты). Анти-чит горизонтальную скорость
+-- техники на земле не ограничивает (проверено до 633 ст/с); единственные
+-- препятствия — невидимые стены NavBlockers: при встрече полоса смещается
+-- (z±14..±42), если свободной полосы нет — торможение и ошибка blocked.
+-- dx — смещение по X со знаком (0 = не ехать, только встать в полосу),
+-- laneZ — абсолютная целевая координата полосы (по умолчанию
+-- DEFAULT_LANE_Z — главный проспект). isCancelled — кооперативная отмена.
+function Vehicles:drive(dx, laneZ, isCancelled)
+	dx = tonumber(dx) or 0
+	laneZ = tonumber(laneZ) or self.DEFAULT_LANE_Z
+	if dx % 1 ~= 0 or math.abs(dx) > self.MAX_DRIVE_DIST then
+		return { success = false, error = "x must be an integer in [-" .. self.MAX_DRIVE_DIST .. ", " .. self.MAX_DRIVE_DIST .. "]" }
+	end
+	if math.abs(laneZ) > 20000 then
+		return { success = false, error = "z must be in [-20000, 20000]" }
+	end
+	local root, err, model = self:_car()
+	if not root then
+		return { success = false, error = err }
+	end
+	local s = self:_ensureSession(root, model)
+	s.mode = "drive"
+	s.studs = math.max(root.Position.Y - self:_groundY(s, root.Position), 0.8)
+	local dir = dx < 0 and -1 or (dx > 0 and 1 or 0)
+	local startX = root.Position.X
+	local targetX = startX + dx
+	local t0 = tick()
+	-- ФАЗА 0: быстрое выравнивание по полосе z (до 40 ст/с боком)
+	local aligned = math.abs(root.Position.Z - laneZ) < 0.5
+	while not aligned and tick() - t0 < 10 and s.root.Parent do
+		if isCancelled and isCancelled() then
+			self:_teardown()
+			return { success = false, error = "cancelled", data = { aligned = false } }
+		end
+		local p = root.Position
+		local gy = self:_groundY(s, p)
+		local vz = math.clamp((laneZ - p.Z) * 4, -40, 40)
+		local vy = math.clamp((gy + s.studs - p.Y) * 4, -10, 10)
+		if vy < 0 and p.Y < gy + s.studs + 0.3 then vy = math.max(vy, -2) end
+		pcall(function()
+			s.bv.Velocity = Vector3.new(0, vy, vz)
+		end)
+		aligned = math.abs(p.Z - laneZ) < 0.5 and s.root.AssemblyLinearVelocity.Magnitude < 8
+		task.wait(self.DT)
+	end
+	pcall(function()
+		s.bv.Velocity = Vector3.zero
+	end)
+	task.wait(0.3)
+	pcall(function()
+		s.root.AssemblyLinearVelocity = Vector3.zero
+	end)
+	if dir == 0 then
+		-- x не передан: только встать в полосу и держать позицию
+		self:_teardown()
+		return { success = true, data = { aligned = true, lane_z = laneZ, position = math.floor(root.Position.X) } }
+	end
+	-- ФАЗА 1: полный разгон + пробег + резкое торможение у цели
+	local ACCEL, BRAKE_CMD, BRAKE_REAL = 60, 80, 65
+	local v, phase = 0, "accel"
+	local vmax, t300 = 0, nil
+	local stuckAt, stuckX = tick(), startX
+	local abortReason, brakeStartX = nil, nil
+	local timeout = math.abs(dx) / 200 + 40
+	while tick() - t0 < timeout and s.root.Parent do
+		if isCancelled and isCancelled() then
+			abortReason = "cancelled"
+			phase = "brake"
+		end
+		local p = root.Position
+		local gy = self:_groundY(s, p)
+		-- препятствия впереди (низким и средним лучом)
+		if phase ~= "brake" then
+			local ahead = Vector3.new(-24 * dir, 0, 0)
+			local b1 = workspace:Raycast(p + Vector3.new(0, 0.3, 0), ahead, s.rayParams)
+			local b2 = workspace:Raycast(p + Vector3.new(0, 1.6, 0), ahead, s.rayParams)
+			if b1 or b2 then
+				local hitName = "unknown"
+				pcall(function()
+					hitName = (b1 or b2).Instance:GetFullName()
+				end)
+				local shifted = false
+				for _, dz in ipairs({14, -14, 28, -28, 42, -42}) do
+					local tp = Vector3.new(p.X, p.Y, laneZ + dz)
+					local h1 = workspace:Raycast(tp + Vector3.new(0, 0.3, 0), Vector3.new(-30 * dir, 0, 0), s.rayParams)
+					local h2 = workspace:Raycast(tp + Vector3.new(0, 1.6, 0), Vector3.new(-30 * dir, 0, 0), s.rayParams)
+					if not h1 and not h2 then
+						laneZ = laneZ + dz
+						shifted = true
+						break
+					end
+				end
+				if not shifted then
+					abortReason = "blocked: " .. hitName
+					phase = "brake"
+				end
+			end
+		end
+		if phase == "accel" then
+			v = math.min(v + ACCEL * self.DT, 1000)
+			if not t300 and v >= 300 then
+				t300 = tick() - t0
+			end
+			if dir * (p.X - targetX) <= (v * v) / (2 * BRAKE_REAL) then
+				phase = "brake"
+				brakeStartX = p.X
+			end
+		elseif phase == "brake" then
+			v = math.max(v - BRAKE_CMD * self.DT, 0)
+			if v <= 0 then break end
+		end
+		local vy = math.clamp((gy + s.studs - p.Y) * 4, -14, 14)
+		if vy < 0 and p.Y < gy + s.studs + 0.3 then vy = math.max(vy, -2) end
+		local vz = math.clamp((laneZ - p.Z) * 3, -40, 40)
+		pcall(function()
+			s.bv.Velocity = Vector3.new(-dir * v, vy, vz)
+		end)
+		local speed = s.root.AssemblyLinearVelocity.Magnitude
+		-- сброс анти-чита/срыв сцепления: скорость рухнула при высокой команде
+		if phase ~= "brake" and v > 30 and speed < v * 0.35 then
+			abortReason = string.format("knock at v=%d", v)
+			phase = "brake"
+		end
+		vmax = math.max(vmax, speed)
+		-- сторож застревания: команда есть, смещения нет
+		if tick() - stuckAt >= 1.5 then
+			if v > 10 and math.abs(p.X - stuckX) < 1.5 then
+				abortReason = "stuck/locked"
+				v = 0
+				pcall(function()
+					s.bv.Velocity = Vector3.zero
+				end)
+				break
+			end
+			stuckAt, stuckX = tick(), p.X
+		end
+		task.wait(self.DT)
+	end
+	-- АКТИВНАЯ ОСТАНОВКА: техника сохраняет импульс — держим ноль,
+	-- пока реальная скорость не упадёт (иначе укатится сама)
+	pcall(function()
+		s.bv.Velocity = Vector3.zero
+	end)
+	local tStop = tick()
+	while s.root.AssemblyLinearVelocity.Magnitude > 2 and tick() - tStop < 4 and s.root.Parent do
+		task.wait(0.1)
+	end
+	local pEnd = s.root.Position
+	local travelled = math.abs(pEnd.X - startX)
+	local brakeDist = brakeStartX and math.abs(brakeStartX - pEnd.X) or -1
+	self:_teardown()
+	pcall(function()
+		s.root.AssemblyLinearVelocity = Vector3.zero
+	end)
+	local data = {
+		travelled = math.floor(travelled),
+		vmax = math.floor(vmax),
+		brake_dist = math.floor(brakeDist),
+		lane_z = laneZ,
+		time = math.floor((tick() - t0) * 10) / 10,
+	}
+	if t300 then
+		data.t_300 = math.floor(t300 * 10) / 10
+	end
+	if abortReason then
+		return { success = false, error = abortReason, data = data }
+	end
+	return { success = true, data = data }
 end
 
 return Vehicles
