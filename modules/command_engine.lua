@@ -3,7 +3,7 @@ local Players = game:GetService("Players")
 local CommandEngine = {}
 CommandEngine.__index = CommandEngine
 
-function CommandEngine.new(privateServer, afk, state)
+function CommandEngine.new(privateServer, afk, state, printers)
 	local self = setmetatable({}, CommandEngine)
 	self.cancelled = false
 	self.currentCommandId = nil
@@ -19,11 +19,25 @@ function CommandEngine.new(privateServer, afk, state)
 			self.privateServer = PrivateServer.new()
 		end
 	end
+	if printers then
+		self.printers = printers
+	else
+		local ok, Printers = pcall(function()
+			return require(script.Parent:WaitForChild("printers"))
+		end)
+		if ok and Printers then
+			self.printers = Printers.new()
+		end
+	end
 	return self
 end
 
 function CommandEngine:setAfk(afk)
 	self.afk = afk
+end
+
+function CommandEngine:setPrinters(printers)
+	self.printers = printers
 end
 
 function CommandEngine:setState(state)
@@ -328,6 +342,24 @@ function CommandEngine:getCommandsSpec()
 					min = 10,
 					max = 500,
 					description = "Максимальное расстояние до ближайшего существующего принтера в папке (по умолчанию 200)",
+				},
+			},
+		},
+		{
+			name = "get_inventory",
+			description = "Вернуть инвентарь персонажа: содержимое рюкзака (по именам с количеством), предмет в руке и сводку по принтерам (в рюкзаке, в руке, суммарно, с уникальными id экземпляров)",
+			params = {},
+		},
+		{
+			name = "buy_printer",
+			description = "Купить N Money Printer у витрины. Требует стоять у витрины (prompt в зоне досягаемости). Покупка выполняется прямым вводом в ProximityPrompt (без эмуляции клавиш), каждая покупка верифицируется по фактическому приросту числа принтеров; при нехватке денег команда останавливается и возвращает сколько куплено",
+			params = {
+				count = {
+					type = "integer",
+					required = false,
+					min = 1,
+					max = 50,
+					description = "Сколько принтеров купить (по умолчанию 1, максимум 50)",
 				},
 			},
 		},
@@ -1393,6 +1425,38 @@ function CommandEngine:_respawnForMoney(payload)
 			target_amount = amount,
 		},
 	}
+end
+
+function CommandEngine:_getInventoryCommand()
+	if not self.printers then
+		return { success = false, error = "printers module unavailable" }
+	end
+	local ok, inv = pcall(function()
+		return self.printers:getInventory()
+	end)
+	if not ok then
+		return { success = false, error = tostring(inv) }
+	end
+	return { success = true, data = inv }
+end
+
+function CommandEngine:_buyPrinterCommand(payload)
+	if not self.printers then
+		return { success = false, error = "printers module unavailable" }
+	end
+	local count = tonumber(payload.count) or 1
+	local ok, res = pcall(function()
+		return self.printers:buyPrinters(count, function()
+			return self:_isCancelled()
+		end)
+	end)
+	if not ok then
+		return { success = false, error = tostring(res) }
+	end
+	if not res.success then
+		return { success = false, error = res.error, data = { bought = res.bought } }
+	end
+	return { success = true, data = res }
 end
 
 function CommandEngine:_placePrinterCommand(payload)
@@ -3431,6 +3495,10 @@ function CommandEngine:execute(command)
 		result = self:_placePrinterCommand(payload)
 	elseif name == "place_all_printers" then
 		result = self:_placeAllPrintersCommand(payload)
+	elseif name == "get_inventory" then
+		result = self:_getInventoryCommand()
+	elseif name == "buy_printer" then
+		result = self:_buyPrinterCommand(payload)
 	elseif name == "jump" then
 		result = self:_jumpCommand()
 	elseif name == "hold_key" then

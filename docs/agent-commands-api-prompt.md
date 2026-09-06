@@ -182,6 +182,16 @@ POST /commands/{id}/status
       }
     },
     {
+      "name": "get_inventory",
+      "params": {}
+    },
+    {
+      "name": "buy_printer",
+      "params": {
+        "count": { "type": "number", "min": 1, "max": 50 }
+      }
+    },
+    {
       "name": "jump",
       "params": {}
     },
