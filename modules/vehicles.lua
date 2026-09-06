@@ -99,7 +99,13 @@ function Vehicles:_loop(s)
 			local gy = groundY + 0.3
 			vx = math.clamp((s.holdX - p.X) * 3, -12, 12)
 			vz = math.clamp((s.holdZ - p.Z) * 3, -12, 12)
-			vy = math.clamp((gy - p.Y) * 3, -12, 12)
+			if p.Y - groundY > 8 then
+				-- падение: не тормозим (проверено — анти-чит не трогает,
+				-- машина цела), только держим горизонталь
+				vy = -60
+			else
+				vy = math.clamp((gy - p.Y) * 4, -20, 20)
+			end
 			if math.abs(gy - p.Y) < 0.1 and math.abs(s.root.Velocity.Y) < 1 then
 				s.landed = true
 				break
