@@ -12,6 +12,7 @@
 -- (скорее всего не хватило денег).
 
 local Players = game:GetService("Players")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local Printers = {}
 Printers.__index = Printers
@@ -29,6 +30,18 @@ Printers.BUY_PAUSE = 0.25
 -- Сколько ждём фактического появления принтера после нажатия, прежде чем
 -- считать покупку неудавшейся (нет денег / лаг сервера).
 Printers.BUY_CONFIRM_TIMEOUT = 3
+
+-- Размещение (механика игры, замерено на живом сервере):
+-- принтер экипируется в руку, сервер ставит модель на
+-- charPos + LookVector * 4 (MoneyPrinterConfig.PLACEMENT_FORWARD_DISTANCE = 4)
+-- с рейкастом вниз для поиска пола; активация — клик мышью (Tool.Activated).
+Printers.PLACE_FORWARD = 4
+Printers.PLACE_CONFIRM_TIMEOUT = 2.5
+-- Шаг сетки размещения: габарит модели (2.11 x 1.79) минус частичное
+-- наложение друг на друга (владелец разрешил компактную укладку).
+Printers.GRID_STEP = 1.4
+-- Отступ первой ячейки от грани (половина габарита + запас от стены).
+Printers.GRID_EDGE_MARGIN = 1.05
 
 function Printers.new()
 	local self = setmetatable({}, Printers)
@@ -219,6 +232,298 @@ function Printers:buyPrinters(count, isCancelled)
 		bought = bought,
 		requested = requested,
 		printers_total = self:getInventory().printers_total,
+	}
+end
+
+-- ==================== РАЗМЕЩЕНИЕ В КОМНАТЕ ====================
+
+-- Определяет комнату, внутри которой стоит персонаж: ищем юнит квартиры,
+-- чей невидимый Part "Region" содержит позицию персонажа. Работает для
+-- любой комнаты (комнаты у всех разные, Region есть в каждом юните).
+function Printers:detectRoom()
+	local player = self:_player()
+	local character = player and player.Character
+	local hrp = character and character:FindFirstChild("HumanoidRootPart")
+	if not hrp then
+		return nil, "character not found"
+	end
+	local gameplay = workspace:FindFirstChild("Gameplay")
+	local units = gameplay and gameplay:FindFirstChild("Apartments") and gameplay.Apartments:FindFirstChild("Units")
+	if not units then
+		return nil, "apartments not found on this server"
+	end
+	for _, unit in ipairs(units:GetChildren()) do
+		local region = unit:FindFirstChild("Region", true)
+		if region and region:IsA("BasePart") then
+			local half = region.Size / 2
+			local rp = region.Position
+			local p = hrp.Position
+			if math.abs(p.X - rp.X) <= half.X and math.abs(p.Y - rp.Y) <= half.Y + 3 and math.abs(p.Z - rp.Z) <= half.Z then
+				local folder = unit:FindFirstChild("MoneyPrinters", true)
+				return {
+					unit = unit,
+					region = region,
+					folder = folder,
+					ownerUserId = unit:GetAttribute("ApartmentOwnerUserId"),
+				}
+			end
+		end
+	end
+	return nil, "character is not inside any apartment room"
+end
+
+-- Внутренние границы комнаты: рейкасты от центра региона по 4 сторонам
+-- на нескольких высотах (берём самое дальнее попадание — мебель ближе стен).
+-- Если луч вышел через проём/не попал — граница берётся от региона с запасом.
+function Printers:_interiorBounds(region)
+	local rp, rs = region.Position, region.Size
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local player = self:_player()
+	if player and player.Character then
+		params.FilterDescendantsInstances = {player.Character}
+	end
+	local ray = workspace:Raycast(Vector3.new(rp.X, rp.Y, rp.Z), Vector3.new(0, -rs.Y, 0), params)
+	local floorY = ray and ray.Position.Y or (rp.Y - rs.Y / 2)
+	local center = Vector3.new(rp.X, floorY + 1.5, rp.Z)
+	local maxRay = math.max(rs.X, rs.Z) + 10
+	local function face(dir)
+		local best = nil
+		for h = 0.6, 2.6, 1 do
+			local origin = Vector3.new(center.X, floorY + h, center.Z)
+			local hit = workspace:Raycast(origin, dir * maxRay, params)
+			if hit then
+				local d = (hit.Position - origin).Magnitude
+				if not best or d > best then
+					best = d
+				end
+			end
+		end
+		return best
+	end
+	local margin = 0.6
+	local minXD, maxXD = face(Vector3.new(-1, 0, 0)), face(Vector3.new(1, 0, 0))
+	local minZD, maxZD = face(Vector3.new(0, 0, -1)), face(Vector3.new(0, 0, 1))
+	return {
+		minX = minXD and (center.X - minXD + margin) or (rp.X - rs.X / 2 + margin),
+		maxX = maxXD and (center.X + maxXD - margin) or (rp.X + rs.X / 2 - margin),
+		minZ = minZD and (center.Z - minZD + margin) or (rp.Z - rs.Z / 2 + margin),
+		maxZ = maxZD and (center.Z + maxZD - margin) or (rp.Z + rs.Z / 2 - margin),
+		floorY = floorY,
+	}
+end
+
+-- Число уже стоящих принтеров (моделей с MoneyPrinterId) в комнате.
+function Printers:countPlaced(room)
+	if not room or not room.folder then
+		return 0
+	end
+	local n = 0
+	for _, c in ipairs(room.folder:GetChildren()) do
+		if c:GetAttribute("MoneyPrinterId") then
+			n = n + 1
+		end
+	end
+	return n
+end
+
+-- Экипирует один принтер из рюкзака в руку.
+function Printers:_equipPrinter()
+	local player = self:_player()
+	local character = player and player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local backpack = player and player:FindFirstChildOfClass("Backpack")
+	if not (humanoid and backpack) then
+		return nil
+	end
+	local tool = nil
+	for _, c in ipairs(backpack:GetChildren()) do
+		if self:_isPrinterTool(c) then
+			tool = c
+			break
+		end
+	end
+	if not tool then
+		return nil
+	end
+	humanoid:EquipTool(tool)
+	return tool
+end
+
+-- Активация экипированного инструмента: клик в центр экрана через
+-- VirtualInputManager (официальный ввод, реплицируется на сервер).
+function Printers:_clickActivate()
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return false
+	end
+	local vp = camera.ViewportSize
+	local x, y = vp.X / 2, vp.Y / 2
+	VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+	task.wait(0.08)
+	VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+	return true
+end
+
+-- Размещает ОДИН принтер: экипирует, кликает, ждёт новую модель в папке.
+-- Персонаж должен уже стоять в нужной точке и смотреть в нужную сторону.
+function Printers:placeOne(room, isCancelled)
+	if not room or not room.folder then
+		return { success = false, error = "room not detected" }
+	end
+	local existing = self:countPlaced(room)
+	local tool = self:_equipPrinter()
+	if not tool then
+		return { success = false, error = "no printer tools left in backpack" }
+	end
+	task.wait(0.35)
+	local okClick = self:_clickActivate()
+	if not okClick then
+		return { success = false, error = "VirtualInputManager unavailable" }
+	end
+	local t0 = tick()
+	while tick() - t0 < self.PLACE_CONFIRM_TIMEOUT do
+		task.wait(0.1)
+		if isCancelled and isCancelled() then
+			return { success = false, error = "cancelled" }
+		end
+		if self:countPlaced(room) > existing then
+			return { success = true, placed = self:countPlaced(room) - existing }
+		end
+	end
+	return { success = false, error = "placement not confirmed (limit/stack/position?)" }
+end
+
+-- Ставит персонажа в точку (XZ) и разворачивает по заданному вектору.
+-- Микроперемещения ≤ 4 ст с паузами — скорость ~единицы ст/с, что на порядки
+-- ниже порога античита; ходить нельзя — расставленные принтеры блокируют путь.
+function Printers:_positionCharacter(x, z, forwardVec)
+	local hrp = self:_player().Character:FindFirstChild("HumanoidRootPart")
+	local pos = Vector3.new(x, hrp.Position.Y, z)
+	hrp.CFrame = CFrame.new(pos, pos + forwardVec)
+	task.wait(0.15)
+end
+
+-- Строит сетку ячеек: начало от ЛЕВОГО угла стены, на которую смотрит
+-- персонаж; колонки идут вправо вдоль стены, ряды — вглубь комнаты.
+-- Гарантирует: ячейки не выходят за внутренние границы, позиция персонажа
+-- (ячейка минус PLACE_FORWARD вдоль взгляда) остаётся внутри комнаты.
+function Printers:buildGrid(room, maxTotal)
+	local hrp = self:_player().Character:FindFirstChild("HumanoidRootPart")
+	local look = hrp.CFrame.LookVector
+	local b = self:_interiorBounds(room.region)
+
+	-- Ось стены — доминирующая ось взгляда; sign — направление взгляда по ней.
+	local axis, sign
+	if math.abs(look.X) >= math.abs(look.Z) then
+		axis, sign = "x", look.X > 0 and 1 or -1
+	else
+		axis, sign = "z", look.Z > 0 and 1 or -1
+	end
+	local intoRoom = -sign -- вглубь комнаты (от стены)
+	local wallFace = sign > 0
+		and (axis == "x" and b.maxX or b.maxZ)
+		or (axis == "x" and b.minX or b.minZ)
+
+	-- Правая рука персонажа вдоль стены; левый угол — крайняя точка влево.
+	local right = hrp.CFrame.RightVector
+	local leftOnB = axis == "x" and -right.Z or -right.X
+	local leftOnBSign = leftOnB >= 0 and 1 or -1
+	local cornerB = leftOnBSign > 0
+		and (axis == "x" and b.maxZ or b.maxX)
+		or (axis == "x" and b.minZ or b.minX)
+	local bLimit = leftOnBSign > 0
+		and (axis == "x" and b.minZ or b.minX)
+		or (axis == "x" and b.maxZ or b.maxX)
+
+	local step = self.GRID_STEP
+	local margin = self.GRID_EDGE_MARGIN
+	local cells = {}
+	local row = 0
+	while #cells < maxTotal do
+		local cellA = wallFace + intoRoom * (margin + row * step)
+		local charA = cellA - sign * self.PLACE_FORWARD
+		-- позиция персонажа должна оставаться внутри комнаты по оси A
+		local aMin = (axis == "x" and b.minX or b.minZ) + 0.5
+		local aMax = (axis == "x" and b.maxX or b.maxZ) - 0.5
+		if charA < aMin or charA > aMax then
+			break
+		end
+		local col = 0
+		while #cells < maxTotal do
+			local cellB = cornerB - leftOnBSign * (margin + col * step)
+			-- не пересекаем правый угол
+			if leftOnBSign > 0 and cellB < bLimit + margin then break end
+			if leftOnBSign < 0 and cellB > bLimit - margin then break end
+			local x = axis == "x" and cellA or cellB
+			local z = axis == "x" and cellB or cellA
+			local forwardVec = axis == "x" and Vector3.new(sign, 0, 0) or Vector3.new(0, 0, sign)
+			table.insert(cells, {
+				x = x, z = z,
+				charX = x - forwardVec.X * self.PLACE_FORWARD,
+				charZ = z - forwardVec.Z * self.PLACE_FORWARD,
+				forward = forwardVec,
+				row = row, col = col,
+			})
+			col = col + 1
+		end
+		row = row + 1
+		if col == 0 then
+			-- по оси B даже первый ряд не поместился
+			break
+		end
+	end
+	return cells, { axis = axis, wallFace = wallFace, bounds = b }
+end
+
+-- Размещает до maxTotal принтеров сеткой от левого угла стены.
+-- Требует: персонаж внутри своей комнаты, смотрит на стену-старт.
+function Printers:placeGrid(maxTotal, isCancelled)
+	maxTotal = math.clamp(tonumber(maxTotal) or 50, 1, self.MAX_BUY)
+	local room, err = self:detectRoom()
+	if not room then
+		return { success = false, error = err }
+	end
+	if not room.folder then
+		return { success = false, error = "MoneyPrinters folder not found in room" }
+	end
+	local player = self:_player()
+	if room.ownerUserId and room.ownerUserId ~= player.UserId then
+		return { success = false, error = "room is owned by another player (ApartmentOwnerUserId=" .. tostring(room.ownerUserId) .. ")" }
+	end
+	local startPlaced = self:countPlaced(room)
+	local target = math.min(startPlaced + maxTotal, self.MAX_BUY)
+	local cells = self:buildGrid(room, target - startPlaced)
+	if #cells == 0 then
+		return { success = false, error = "no grid cells fit into the room" }
+	end
+
+	local placed = 0
+	local failed = 0
+	for i, cell in ipairs(cells) do
+		if isCancelled and isCancelled() then
+			return { success = false, error = "cancelled", placed = placed, failed = failed }
+		end
+		self:_positionCharacter(cell.charX, cell.charZ, cell.forward)
+		local res = self:placeOne(room, isCancelled)
+		if res.success then
+			placed = placed + 1
+		else
+			failed = failed + 1
+			if res.error ~= "cancelled" and placed + failed == 1 then
+				-- первая же ячейка не встала — что-то системно не так, не молотим
+				return { success = false, error = res.error, placed = 0, failed = failed }
+			end
+		end
+	end
+
+	return {
+		success = placed > 0,
+		placed = placed,
+		failed = failed,
+		existing = startPlaced,
+		room_total = self:countPlaced(room),
+		cells = #cells,
 	}
 end
 
