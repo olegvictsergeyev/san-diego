@@ -36,7 +36,7 @@ Printers.BUY_CONFIRM_TIMEOUT = 3
 -- charPos + LookVector * 4 (MoneyPrinterConfig.PLACEMENT_FORWARD_DISTANCE = 4)
 -- с рейкастом вниз для поиска пола; активация — клик мышью (Tool.Activated).
 Printers.PLACE_FORWARD = 4
-Printers.PLACE_CONFIRM_TIMEOUT = 2.5
+Printers.PLACE_CONFIRM_TIMEOUT = 5
 -- Шаг сетки размещения: габарит модели (2.11 x 1.79) минус частичное
 -- наложение друг на друга (владелец разрешил компактную укладку).
 Printers.GRID_STEP = 1.4
@@ -352,8 +352,9 @@ function Printers:_interiorBounds(region)
 	}
 end
 
--- Валидация точки (XZ): рейкаст вниз — должно быть чистое место
--- (пол или уже стоящий принтер ~1.2 высотой). Мебель (dy > 1.3) отсекается.
+-- Валидация точки (XZ): повторяем серверный профиль рейкаста — вниз
+-- с высоты персонажа (~floorY+4). Любой хит выше пола — мебель/шкаф/
+-- стоящий принтер → точка занята. Отсутствие хита — считаем занятым.
 function Printers:_isFreeSpot(x, z, floorY)
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
@@ -361,11 +362,11 @@ function Printers:_isFreeSpot(x, z, floorY)
 	if player and player.Character then
 		params.FilterDescendantsInstances = {player.Character}
 	end
-	local hit = workspace:Raycast(Vector3.new(x, floorY + 2, z), Vector3.new(0, -3, 0), params)
+	local hit = workspace:Raycast(Vector3.new(x, floorY + 3.8, z), Vector3.new(0, -5, 0), params)
 	if not hit then
-		return true -- пусто (на всякий случай считаем свободным)
+		return false
 	end
-	return (hit.Position.Y - floorY) <= 1.3
+	return hit.Position.Y <= floorY + 0.1
 end
 
 -- Число уже стоящих принтеров (моделей с MoneyPrinterId) в комнате.
