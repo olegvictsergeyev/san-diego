@@ -85,13 +85,13 @@ function Vehicles:_loop(s)
 		local groundY = self:_groundY(s, p)
 		local vx, vy, vz = 0, 0, 0
 		if s.mode == "hover" then
-			local targetY = math.min(groundY + s.studs, self.ABS_CEILING)
+			local targetY = math.max(math.min(groundY + s.studs, self.ABS_CEILING), groundY + s.rideH)
 			vx = math.clamp((s.holdX - p.X) * 3, -12, 12)
 			vz = math.clamp((s.holdZ - p.Z) * 3, -12, 12)
 			vy = math.clamp((targetY - p.Y) * 3, -12, 12)
 		elseif s.mode == "nav" then
 			-- высота НЕ меняем: повторяем рельеф на стартовой высоте
-			local targetY = math.min(groundY + (s.navStuds or self.HOVER_STEP), self.ABS_CEILING)
+			local targetY = math.max(math.min(groundY + (s.navStuds or self.HOVER_STEP), self.ABS_CEILING), groundY + s.rideH)
 			vx = math.clamp((s.navX - p.X) * 3, -self.NAV_SPEED, self.NAV_SPEED)
 			vz = math.clamp((s.navZ - p.Z) * 3, -self.NAV_SPEED, self.NAV_SPEED)
 			vy = math.clamp((targetY - p.Y) * 3, -14, 14)
@@ -108,13 +108,37 @@ function Vehicles:_loop(s)
 				-- машина цела), только держим горизонталь
 				vy = -60
 			else
-				vy = math.clamp((gy - p.Y) * 4, -20, 20)
+				vy = math.clamp((gy - p.Y) * 4, -3, 20)
 			end
 			-- касание: близко к земле ИЛИ посадка длится >15 с (backstop)
 			if p.Y - groundY < 0.6 or tick() - s.modeSince > 15 then
 				s.landed = true
 				break
 			end
+		end
+		-- ниже естественной стойки не опускаем: вместо штурма вниз
+		-- ограничиваем скорость снижения (защита от «закапывания» колёс)
+		if vy < 0 and p.Y < groundY + s.rideH + 0.3 then
+			vy = math.max(vy, -3)
+		end
+		-- сторож застревания: горизонтальные команды есть, а смещения нет
+		-- (стена/препятствие либо физика перестала реплицироваться) —
+		-- глушим сессию, чтобы не давить машину в препятствие
+		if tick() - (s.stuckAt or 0) >= 1 then
+			if math.abs(vx) + math.abs(vz) > 8 then
+				local moved = math.sqrt((p.X - (s.stuckX or p.X)) ^ 2 + (p.Z - (s.stuckZ or p.Z)) ^ 2)
+				if moved < 1 then
+					s.stuckCount = (s.stuckCount or 0) + 1
+					if s.stuckCount >= 2 then
+						s.stuck = true
+						s.alive = false
+						break
+					end
+				else
+					s.stuckCount = 0
+				end
+			end
+			s.stuckX, s.stuckZ, s.stuckAt = p.X, p.Z, tick()
 		end
 		pcall(function()
 			s.bv.Velocity = Vector3.new(vx, vy, vz)
@@ -187,7 +211,12 @@ function Vehicles:_ensureSession(root, model)
 		landed = false,
 		knocks = 0,
 		alive = true,
+		stuck = false,
 	}
+	-- естественная высота стойки машины (root над поверхностью): контроллер
+	-- никогда не тянет машину ниже этого уровня — иначе подвеску/колёса
+	-- проталкивает сквозь тонкие части земли (машина «закапывается»)
+	s.rideH = math.clamp(root.Position.Y - self:_groundY(s, root.Position), 0.5, 4)
 	self.session = s
 	task.spawn(function()
 		self:_loop(s)
@@ -235,6 +264,10 @@ function Vehicles:land(isCancelled)
 		if isCancelled and isCancelled() then
 			self:_teardown()
 			return { success = false, error = "cancelled", data = { landed = false, knocks = knocks, height = level } }
+		end
+		if s.stuck then
+			self:_teardown()
+			return { success = false, error = "stuck: physics not replicating", data = { landed = false, knocks = knocks, height = level } }
 		end
 		task.wait(0.1)
 	end
@@ -297,6 +330,13 @@ function Vehicles:navigate(dx, dz, isCancelled)
 	end
 	local travelled = math.sqrt((s.root.Position.X - startX) ^ 2 + (s.root.Position.Z - startZ) ^ 2)
 	local knocks = s.knocks
+	if s.stuck then
+		-- сторож застревания остановил сессию: машина уперлась в
+		-- препятствие или физика перестала реплицироваться (локаут
+		-- анти-чита) — констрейнты снимаем, дальше не давим
+		self:_teardown()
+		return { success = false, error = "stuck: blocked or physics not replicating", data = { travelled = math.floor(travelled), knocks = knocks } }
+	end
 	if not s.navArrived then
 		-- таймаут: сессию НЕ оставляем — иначе её цикл продолжит писать
 		-- скорости и конфликтовать со следующими командами
@@ -320,6 +360,61 @@ function Vehicles:navigate(dx, dz, isCancelled)
 	-- высота в nav не менялась — посадка не нужна, просто снимаем констрейнты
 	self:_teardown()
 	return { success = true, data = { landed = true, travelled = math.floor(travelled), knocks = knocks } }
+end
+
+-- Диагностика положения машины относительно земли. Отвечает на вопрос
+-- «машина на поверхности или закопана» — то, что нельзя понять по одной
+-- координате Y:
+--   ride_height — высота Root над поверхностью (естественная стойка ~2.2);
+--   wheel_min/wheel_max — зазор колёс (центр колеса над поверхностью,
+--     естественный ~+1.3); wheel_min < 0.2 => хотя бы одно колесо под землёй;
+--   state: "on_ground" | "buried" | "airborne" | "unknown".
+function Vehicles:groundState()
+	local root, err, model = self:_car()
+	if not root then
+		return { success = false, error = err }
+	end
+	local rayParams = self:_makeRayParams(model)
+	local p = root.Position
+	local hit = workspace:Raycast(p + Vector3.new(0, 4, 0), Vector3.new(0, -30, 0), rayParams)
+	local gy = hit and hit.Position.Y
+	local rideH = gy and (p.Y - gy) or nil
+	local minWd, maxWd = math.huge, -math.huge
+	for _, d in ipairs(root:GetChildren()) do
+		if d:IsA("CylindricalConstraint") and d.Attachment1 then
+			local w = d.Attachment1.Parent
+			if w then
+				local wh = workspace:Raycast(w.Position + Vector3.new(0, 4, 0), Vector3.new(0, -10, 0), rayParams)
+				if wh then
+					local diff = w.Position.Y - wh.Position.Y
+					minWd = math.min(minWd, diff)
+					maxWd = math.max(maxWd, diff)
+				end
+			end
+		end
+	end
+	local state = "unknown"
+	if rideH and minWd ~= math.huge then
+		if minWd < 0.2 or rideH < 1.2 then
+			state = "buried"
+		elseif rideH > 3.5 then
+			state = "airborne"
+		else
+			state = "on_ground"
+		end
+	end
+	local function rnd(v)
+		return v and math.floor(v * 100 + 0.5) / 100 or "unknown"
+	end
+	return { success = true, data = {
+		state = state,
+		grounded = state == "on_ground",
+		ride_height = rnd(rideH),
+		wheel_min = rnd(minWd ~= math.huge and minWd or nil),
+		wheel_max = rnd(maxWd ~= -math.huge and maxWd or nil),
+		position = { x = math.floor(p.X), y = math.floor(p.Y * 10) / 10, z = math.floor(p.Z) },
+		speed = math.floor(root.AssemblyLinearVelocity.Magnitude * 10) / 10,
+	} }
 end
 
 return Vehicles

@@ -206,6 +206,10 @@ POST /commands/{id}/status
       }
     },
     {
+      "name": "car_state",
+      "params": {}
+    },
+    {
       "name": "jump",
       "params": {}
     },
