@@ -434,7 +434,7 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 			if not t300 and v >= 300 then
 				t300 = tick() - t0
 			end
-			if dir * (p.X - targetX) <= (v * v) / (2 * BRAKE_REAL) then
+			if dir * (targetX - p.X) <= (v * v) / (2 * BRAKE_REAL) then
 				phase = "brake"
 				brakeStartX = p.X
 			end
