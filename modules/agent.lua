@@ -507,10 +507,9 @@ function Agent:start()
 	if self.afk then
 		local afk = self.afk
 		afk:setBusyCheck(function()
-			if self.currentCommand ~= nil then
-				return true
-			end
 			-- Не мешать между командами, если последняя команда закончилась недавно.
+			-- Длительные команды (transfer_money_via_respawn и т.п.) НЕ блокируют AFK:
+			-- анти-AFK активность должна работать как часы, иначе игрок кикается за бездействие.
 			if self.lastCommandFinishedAt and tick() - self.lastCommandFinishedAt < 15 then
 				return true
 			end
