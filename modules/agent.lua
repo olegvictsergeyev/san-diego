@@ -101,7 +101,10 @@ function Agent:_sendStatus(force)
 	if typeof(snapshot.custom_data) == "table" then
 		local cd = {}
 		for k, v in pairs(snapshot.custom_data) do
-			if k ~= "time_1" and k ~= "time_2" and k ~= "time_3" and k ~= "time_4" and k ~= "time_5" then
+			-- time_* тикают каждую секунду, position_y шумит (прыжки AFK,
+			-- неровности) — ни то ни другое не должно триггерить отправку.
+			if k ~= "time_1" and k ~= "time_2" and k ~= "time_3" and k ~= "time_4" and k ~= "time_5"
+				and k ~= "position_y" then
 				cd[k] = v
 			end
 		end
