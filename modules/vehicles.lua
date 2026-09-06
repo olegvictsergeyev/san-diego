@@ -457,10 +457,12 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 			s.ao.CFrame = CFrame.lookAt(p, p + d)
 		end)
 		local errYaw = yawErrTo(d)
-		-- препятствия впереди (низким и средним лучом вдоль курса)
-		if phase ~= "brake" then
-			local b1 = workspace:Raycast(p + Vector3.new(0, 0.3, 0) + d * 6, d * 30, s.rayParams)
-			local b2 = workspace:Raycast(p + Vector3.new(0, 1.6, 0) + d * 6, d * 30, s.rayParams)
+		-- препятствия впереди (низким и средним лучом вдоль оси дороги;
+		-- пока далеко от полосы и идёт выравнивание — не детектим)
+		if phase ~= "brake" and math.abs(p.Z - laneZ) < 10 then
+			local ahead = Vector3.new(6 * dir, 0, 0)
+			local b1 = workspace:Raycast(p + Vector3.new(0, 0.3, 0) + ahead, ahead * 5, s.rayParams)
+			local b2 = workspace:Raycast(p + Vector3.new(0, 1.6, 0) + ahead, ahead * 5, s.rayParams)
 			if b1 or b2 then
 				local hitName = "unknown"
 				pcall(function()
