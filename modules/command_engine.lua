@@ -3,7 +3,7 @@ local Players = game:GetService("Players")
 local CommandEngine = {}
 CommandEngine.__index = CommandEngine
 
-function CommandEngine.new(privateServer, afk, state, printers)
+function CommandEngine.new(privateServer, afk, state, printers, vehicles)
 	local self = setmetatable({}, CommandEngine)
 	self.cancelled = false
 	self.currentCommandId = nil
@@ -29,6 +29,16 @@ function CommandEngine.new(privateServer, afk, state, printers)
 			self.printers = Printers.new()
 		end
 	end
+	if vehicles then
+		self.vehicles = vehicles
+	else
+		local ok, Vehicles = pcall(function()
+			return require(script.Parent:WaitForChild("vehicles"))
+		end)
+		if ok and Vehicles then
+			self.vehicles = Vehicles.new()
+		end
+	end
 	return self
 end
 
@@ -38,6 +48,10 @@ end
 
 function CommandEngine:setPrinters(printers)
 	self.printers = printers
+end
+
+function CommandEngine:setVehicles(vehicles)
+	self.vehicles = vehicles
 end
 
 function CommandEngine:setState(state)
@@ -364,6 +378,39 @@ function CommandEngine:getCommandsSpec()
 			name = "deploy_printers",
 			description = "Проверить инвентарь и расстановку принтеров: если у персонажа есть Money Printer в рюкзаке/руке и разложено менее 50 — подобрать все разложенные и разложить заново сеткой по комнате (ряды прижаты к стене напротив двери, шаг 1.4, валидация мебели). Затем встать ровно по центру комнаты спиной к стене с дверью. Если принтеров в инвентаре нет — только встать по центру спиной к двери. Требует стоять в целевой комнате своего апартамента",
 			params = {},
+		},
+		{
+			name = "fly_car",
+			description = "Полёт машины: поднять и держать на высоте, пока не придёт отмена. height — абстрактная градация 0..10 (не стады): 1 ≈ 5 ст над поверхностью, 10 ≈ максимум, разрешённый анти-читом (~50 ст). height=0 — плавно опустить и завершить сессию. Машина висит стабильно на месте (точка фиксируется на момент команды). Требует сидеть в машине",
+			params = {
+				height = {
+					type = "integer",
+					required = true,
+					min = 0,
+					max = 10,
+					description = "Градация высоты 0..10 (0 = посадка и завершение)",
+				},
+			},
+		},
+		{
+			name = "nav_car",
+			description = "Перемещение летающей машины на смещение по осям: x и z — расстояние в стадах со знаком направления (±2000). Скорость фиксированная 25 ст/с, высота полёта +6 над поверхностью (проверенный профиль: анти-чит не срабатывает). Если активна сессия fly_car — после прибытия вернётся в зависание на прежней высоте, иначе сядет. Требует сидеть в машине",
+			params = {
+				x = {
+					type = "integer",
+					required = true,
+					min = -2000,
+					max = 2000,
+					description = "Смещение по X в стадах (+/- направление)",
+				},
+				z = {
+					type = "integer",
+					required = true,
+					min = -2000,
+					max = 2000,
+					description = "Смещение по Z в стадах (+/- направление)",
+				},
+			},
 		},
 		{
 			name = "buy_printer",
@@ -1575,6 +1622,54 @@ function CommandEngine:_deployPrintersCommand()
 	return { success = true, data = res.data }
 end
 
+function CommandEngine:_flyCarCommand(payload)
+	if not self.vehicles then
+		return { success = false, error = "vehicles module unavailable" }
+	end
+	payload = payload or {}
+	local height = payload.height
+	if typeof(height) ~= "number" or height % 1 ~= 0 or height < 0 or height > 10 then
+		return { success = false, error = "height must be an integer 0..10" }
+	end
+	local ok, res = pcall(function()
+		if height == 0 then
+			return self.vehicles:land()
+		end
+		return self.vehicles:hover(height)
+	end)
+	if not ok then
+		return { success = false, error = tostring(res) }
+	end
+	if not res.success then
+		return { success = false, error = res.error, data = res.data }
+	end
+	return { success = true, data = res.data }
+end
+
+function CommandEngine:_navCarCommand(payload)
+	if not self.vehicles then
+		return { success = false, error = "vehicles module unavailable" }
+	end
+	payload = payload or {}
+	local x, z = payload.x, payload.z
+	if typeof(x) ~= "number" or x % 1 ~= 0 or x < -2000 or x > 2000 then
+		return { success = false, error = "x must be an integer in [-2000, 2000]" }
+	end
+	if typeof(z) ~= "number" or z % 1 ~= 0 or z < -2000 or z > 2000 then
+		return { success = false, error = "z must be an integer in [-2000, 2000]" }
+	end
+	local ok, res = pcall(function()
+		return self.vehicles:navigate(x, z)
+	end)
+	if not ok then
+		return { success = false, error = tostring(res) }
+	end
+	if not res.success then
+		return { success = false, error = res.error, data = res.data }
+	end
+	return { success = true, data = res.data }
+end
+
 function CommandEngine:_jumpCommand()
 	local humanoid = self:_getHumanoid()
 	if not humanoid then
@@ -2595,6 +2690,10 @@ function CommandEngine:execute(command)
 		result = self:_pickupAllPrintersCommand()
 	elseif name == "deploy_printers" then
 		result = self:_deployPrintersCommand()
+	elseif name == "fly_car" then
+		result = self:_flyCarCommand(payload)
+	elseif name == "nav_car" then
+		result = self:_navCarCommand(payload)
 	elseif name == "jump" then
 		result = self:_jumpCommand()
 	elseif name == "hold_key" then

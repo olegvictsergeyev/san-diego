@@ -193,6 +193,19 @@ POST /commands/{id}/status
       "params": {}
     },
     {
+      "name": "fly_car",
+      "params": {
+        "height": { "type": "integer", "min": 0, "max": 10 }
+      }
+    },
+    {
+      "name": "nav_car",
+      "params": {
+        "x": { "type": "integer", "min": -2000, "max": 2000 },
+        "z": { "type": "integer", "min": -2000, "max": 2000 }
+      }
+    },
+    {
       "name": "jump",
       "params": {}
     },

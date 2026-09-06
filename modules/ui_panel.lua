@@ -9,7 +9,7 @@
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "2.0.3",
+    version = "2.1.0",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -62,6 +62,7 @@ local CONFIG = {
             autoexec = base .. "/modules/autoexec.lua",
             afk = base .. "/modules/afk.lua",
             printers = base .. "/modules/printers.lua",
+            vehicles = base .. "/modules/vehicles.lua",
         }
     end)(),
 
@@ -132,6 +133,7 @@ local ResultStore = loadModule("result_store")
 local Agent = loadModule("agent")
 local Afk = loadModule("afk")
 local Printers = loadModule("printers")
+local Vehicles = loadModule("vehicles")
 
 local privateServer = PrivateServer.new({
     loaderUrl = CONFIG.agentLoaderUrl,
@@ -156,7 +158,8 @@ local function makeAgent()
     local state = StateCollector.new(CONFIG.balancePath, CONFIG.version)
     local afk = Afk.new(CONFIG)
     local printers = Printers.new()
-    local engine = CommandEngine.new(privateServer, afk, state, printers)
+    local vehicles = Vehicles.new()
+    local engine = CommandEngine.new(privateServer, afk, state, printers, vehicles)
     privateServer:setCommandEngine(engine)
     local resultStore = ResultStore.new(Compat, state:getNickname())
     return Agent.new(CONFIG, http, state, engine, afk, resultStore)
