@@ -6,16 +6,15 @@ Vehicles.__index = Vehicles
 -- Параметры безопасного полёта, калиброванные на живом сервере (см. тесты):
 -- ABS_CEILING — абсолютный потолок ~66-67 ст: выше анти-чит мгновенно
 --   сбрасывает машину на y≈22-23 с полной остановкой.
--- HOVER_STEP — высота fly_car задаётся в абстрактных градациях 0..10,
---   1 градация = 5 ст над поверхностью (10 ≈ 50 ст — максимум для зависания).
--- NAV_ALT — высота перемещения (+6 над поверхностью по рейкасту): на ней
---   анти-чит не срабатывает даже на длинных дистанциях (проверено 1000 ст).
+-- HOVER_STEP — высота fly_car задаётся в градациях 0..10, 1 градация = 1 ст
+--   над поверхностью (рейкаст). 10 = +10 ст — максимум, разрешённый
+--   анти-читом В ДВИЖЕНИИ (проверено: 30+ с полёта на 20 ст/с без сбросов).
+--   Выше +10 ст в движении анти-чит сбрасывает машину каждые ~13-15 с.
+-- NAV_ALT — высота перемещения nav_car = максимальной безопасной (10 ст).
 -- NAV_SPEED — 25 ст/с: фиксированная допустимая скорость перемещения.
--- На высоте ~+15 и выше В ДВИЖЕНИИ анти-чит сбрасывает машину каждые
--- ~13-15 с полёта — поэтому nav летит низко, а hover не двигается.
 Vehicles.ABS_CEILING = 64
-Vehicles.HOVER_STEP = 5
-Vehicles.NAV_ALT = 6
+Vehicles.HOVER_STEP = 1
+Vehicles.NAV_ALT = 10
 Vehicles.NAV_SPEED = 25
 Vehicles.MAX_DIST = 2000
 Vehicles.DT = 0.05
@@ -96,6 +95,7 @@ function Vehicles:_loop(s)
 				s.navArrived = true
 			end
 		elseif s.mode == "landing" then
+			if not s.modeSince then s.modeSince = tick() end
 			local gy = groundY + 0.3
 			vx = math.clamp((s.holdX - p.X) * 3, -12, 12)
 			vz = math.clamp((s.holdZ - p.Z) * 3, -12, 12)
@@ -106,7 +106,8 @@ function Vehicles:_loop(s)
 			else
 				vy = math.clamp((gy - p.Y) * 4, -20, 20)
 			end
-			if math.abs(gy - p.Y) < 0.1 and math.abs(s.root.Velocity.Y) < 1 then
+			-- касание: близко к земле ИЛИ посадка длится >15 с (backstop)
+			if p.Y - groundY < 0.6 or tick() - s.modeSince > 15 then
 				s.landed = true
 				break
 			end
@@ -204,6 +205,7 @@ function Vehicles:land()
 		return { success = true, data = { landed = true, note = "no active fly session" } }
 	end
 	s.mode = "landing"
+	s.modeSince = nil
 	s.holdX = s.root.Position.X
 	s.holdZ = s.root.Position.Z
 	local knocks = s.knocks
@@ -259,6 +261,7 @@ function Vehicles:navigate(dx, dz)
 		return { success = true, data = { travelled = math.floor(travelled), knocks = knocks, resumed = "hover", height = resumeLevel } }
 	end
 	s.mode = "landing"
+	s.modeSince = nil
 	s.holdX = s.root.Position.X
 	s.holdZ = s.root.Position.Z
 	t0 = tick()
