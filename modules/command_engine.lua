@@ -800,20 +800,20 @@ function CommandEngine:_moveAxis(axis, payload)
 	local sign = value >= 0 and 1 or -1
 	local _, startYaw = hrp.CFrame:ToEulerAnglesYXZ()
 
-	-- Базовые шаги: номинальная скорость ~24 студии/с.
+	-- Базовые шаги: speed=10 = 8 студий за шаг, пауза 0.25 с = 32 ст/с.
 	-- ЛИМИТ АНТИЧИТА SAN DIEGO (AntiTp) — эмпирически ~32-45 ст/с (проверено
 	-- Potassium-тестами: 32 ст/с × 25с чисто, 48 ст/с — rollback позиции;
-	-- rollback'и НЕ жгут инфракции, но срывают погоню). Запас ~30% от границы.
-	-- X/Z: 6 студий за шаг, пауза 0.25 с. Y: 6 студий за шаг, пауза 0.25 с.
+	-- rollback'и НЕ жгут инфракции, но срывают погоню). 32 ст/с = максимум
+	-- проверенный чистым, поэтому speed=10 выдаёт именно его, не выше.
 	-- speed 1..10 масштабирует только длину шага, поэтому min в 10 раз медленнее.
 	-- ВАЖНО: никогда не анкорить персонажа во время движения и не делать
 	-- одиночных прыжков > 16 студий — фиксируется античитом.
 	local baseStep, baseWait
 	if axis == "y" then
-		baseStep = 6
+		baseStep = 8
 		baseWait = 0.25
 	else
-		baseStep = 6
+		baseStep = 8
 		baseWait = 0.25
 	end
 
@@ -957,9 +957,10 @@ function CommandEngine:_moveTo(payload)
 		}
 	end
 
-	-- Те же параметры, что и в _moveAxis: 6 студий за шаг, пауза 0.25 с.
-	-- Номинальная скорость ~24 студии/с — лимит античита ~32-45 ст/с (см. _moveAxis).
-	local baseStep = 6
+	-- Те же параметры, что и в _moveAxis: 8 студий за шаг, пауза 0.25 с.
+	-- speed=10 = 32 ст/с — максимум проверенный чистым (лимит античита
+	-- ~32-45 ст/с, см. _moveAxis), не выше.
+	local baseStep = 8
 	local baseWait = 0.25
 	local stepSize = baseStep * (speed / 10)
 	local waitTime = baseWait
