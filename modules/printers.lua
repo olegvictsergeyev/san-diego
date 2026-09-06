@@ -615,6 +615,9 @@ end
 -- новую позицию персонажа, иначе InvokeServer вернёт false (старая
 -- позиция слишком далеко от промпта, персонаж «стоит на принтере»).
 -- Неуспех → до 3 попыток с повторным подводом.
+-- Персонаж всегда подводится в сторону ЦЕНТРА апартамента (и не выходит
+-- за внутренние границы) — иначе при промпте, обращённом к стене,
+-- персонаж телепортировался за пределы комнаты.
 function Printers:_pickupOne(model, isCancelled)
 	if not (model and model.Parent) then
 		return { success = false, error = "model is gone" }
@@ -623,6 +626,13 @@ function Printers:_pickupOne(model, isCancelled)
 	if not remote then
 		return { success = false, error = "pickup remote not found" }
 	end
+	local room = self:detectRoom()
+	if not room then
+		return { success = false, error = "not inside an apartment" }
+	end
+	local b = self:_interiorBounds(room.region)
+	local center = room.region.Position
+	local modelPos = model:GetBoundingBox().Position
 	local prompt = model:FindFirstChild("MoneyPrinterPickupPrompt", true)
 	local wp = prompt and prompt.Parent and prompt.Parent.WorldPosition
 	local lastErr = "unknown"
@@ -633,36 +643,39 @@ function Printers:_pickupOne(model, isCancelled)
 		if isCancelled and isCancelled() then
 			return { success = false, error = "cancelled" }
 		end
-		-- встаём рядом с точкой промпта (2.5 ст по горизонтали —
-		-- дистанция промпта 8 ст)
-		if wp then
-			local cf = model:GetBoundingBox()
-			local flat = Vector3.new(wp.X - cf.Position.X, 0, wp.Z - cf.Position.Z)
-			if flat.Magnitude < 0.01 then
-				flat = Vector3.new(1, 0, 0)
-			end
-			self:_positionCharacter(wp.X - flat.Unit.X * 2.5, wp.Z - flat.Unit.Z * 2.5, flat.Unit)
-			task.wait(0.7) -- репликация позиции на сервер
+		-- направление от принтера к центру апартамента (внутрь, вдали от стен)
+		local dir = Vector3.new(center.X - modelPos.X, 0, center.Z - modelPos.Z)
+		if dir.Magnitude < 0.01 then
+			dir = Vector3.new(1, 0, 0)
 		end
-		local ok, res = pcall(function()
-			return remote:InvokeServer(model)
-		end)
-		if not ok then
-			lastErr = "pickup invoke failed: " .. tostring(res)
+		local cx = math.clamp(modelPos.X + dir.Unit.X * 2.5, b.minX + 0.5, b.maxX - 0.5)
+		local cz = math.clamp(modelPos.Z + dir.Unit.Z * 2.5, b.minZ + 0.5, b.maxZ - 0.5)
+		self:_positionCharacter(cx, cz, dir.Unit)
+		task.wait(0.7) -- репликация позиции на сервер
+		if wp and (Vector3.new(cx, 0, cz) - Vector3.new(wp.X, 0, wp.Z)).Magnitude > 7 then
+			lastErr = "character too far from prompt after clamping"
+			task.wait(0.5)
 		else
-			lastErr = "pickup not confirmed (res=" .. tostring(res) .. ")"
-			local t0 = tick()
-			while tick() - t0 < self.PICKUP_CONFIRM_TIMEOUT do
-				if isCancelled and isCancelled() then
-					return { success = false, error = "cancelled" }
-				end
-				task.wait(0.1)
-				if not model.Parent then
-					return { success = true }
+			local ok, res = pcall(function()
+				return remote:InvokeServer(model)
+			end)
+			if not ok then
+				lastErr = "pickup invoke failed: " .. tostring(res)
+			else
+				lastErr = "pickup not confirmed (res=" .. tostring(res) .. ")"
+				local t0 = tick()
+				while tick() - t0 < self.PICKUP_CONFIRM_TIMEOUT do
+					if isCancelled and isCancelled() then
+						return { success = false, error = "cancelled" }
+					end
+					task.wait(0.1)
+					if not model.Parent then
+						return { success = true }
+					end
 				end
 			end
+			task.wait(0.5)
 		end
-		task.wait(0.5)
 	end
 	return { success = false, error = lastErr }
 end
