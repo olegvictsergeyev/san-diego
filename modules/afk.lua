@@ -94,6 +94,8 @@ end
 
 -- Имитация активности: клик через VirtualUser + прыжок.
 -- Этот подход совместим с защитой от AFK в San Diego.
+-- ВАЖНО: в машине (VehicleSeat) прыжок и Sit=false выкинули бы персонажа
+-- из сиденья — там ограничиваемся кликом VirtualUser.
 function Afk:_simulateActivity()
 	local VirtualUser = game:GetService("VirtualUser")
 	pcall(function()
@@ -105,6 +107,11 @@ function Afk:_simulateActivity()
 	if not humanoid then return end
 	if humanoid.Health <= 0 then return end
 	if humanoid:GetState() == Enum.HumanoidStateType.Dead then return end
+
+	local seat = humanoid.SeatPart
+	if seat and seat:IsA("VehicleSeat") then
+		return
+	end
 
 	pcall(function()
 		humanoid.PlatformStand = false
