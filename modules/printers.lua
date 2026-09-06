@@ -989,11 +989,11 @@ function Printers:_placeCell(rect, cell, isCancelled)
 			local backCoord, expectedBack, lateralErr
 			if axisX then
 				backCoord = cell.forward.X < 0 and (cf.Position.X - size.X / 2) or (cf.Position.X + size.X / 2)
-				expectedBack = cell.x - cell.forward.X * self.PRINTER_BACK
+				expectedBack = cell.x + cell.forward.X * self.PRINTER_BACK
 				lateralErr = math.abs(cf.Position.Z - cell.z)
 			else
 				backCoord = cell.forward.Z < 0 and (cf.Position.Z - size.Z / 2) or (cf.Position.Z + size.Z / 2)
-				expectedBack = cell.z - cell.forward.Z * self.PRINTER_BACK
+				expectedBack = cell.z + cell.forward.Z * self.PRINTER_BACK
 				lateralErr = math.abs(cf.Position.X - cell.x)
 			end
 			if math.abs(backCoord - expectedBack) < 0.15 and lateralErr < 0.5 then

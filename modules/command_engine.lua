@@ -1635,13 +1635,15 @@ function CommandEngine:_deployPrintersCommand()
 			if out.placed_before > 0 then
 				local pu = self.printers:pickupAllPrinters(isCancelled)
 				if not pu.success then
-					return { success = false, error = "pickup failed: " .. tostring(pu.error), data = out }
+					out.error = "pickup failed: " .. tostring(pu.error)
+					return { success = false, error = out.error, data = out }
 				end
 				out.picked = pu.picked
 			end
 			local pg = self.printers:placeRoomGrid(self.printers.MAX_BUY, isCancelled)
 			if not pg.success then
-				return { success = false, error = "place failed: " .. tostring(pg.error), data = out }
+				out.error = "place failed: " .. tostring(pg.error)
+				return { success = false, error = out.error, data = out }
 			end
 			out.redeployed = true
 			out.placed = pg.placed
@@ -1652,7 +1654,8 @@ function CommandEngine:_deployPrintersCommand()
 		end
 		local st = self.printers:standCenterBackToDoor()
 		if not st.success then
-			return { success = false, error = "stand failed: " .. tostring(st.error), data = out }
+			out.error = "stand failed: " .. tostring(st.error)
+			return { success = false, error = out.error, data = out }
 		end
 		out.position = { x = math.round(st.x * 100) / 100, z = math.round(st.z * 100) / 100 }
 		out.facing = st.facing
