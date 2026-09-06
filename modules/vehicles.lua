@@ -120,9 +120,11 @@ function Vehicles:_loop(s)
 				break
 			end
 		end
-		pcall(function()
-			s.bv.Velocity = Vector3.new(vx, vy, vz)
-		end)
+		if s.mode ~= "drive" then
+			pcall(function()
+				s.bv.Velocity = Vector3.new(vx, vy, vz)
+			end)
+		end
 		-- детект сброса анти-чита: падение >6 ст за 0.3 с
 		if tick() - lastCheck > 0.3 then
 			if lastY - p.Y > 6 then
