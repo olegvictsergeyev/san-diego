@@ -20,6 +20,32 @@ local function deepEqual(a, b)
 	return true
 end
 
+-- Список изменившихся полей статуса (верхний уровень + custom_data).
+local function diffStatusKeys(old, new)
+	local keys = {}
+	local oldCustom = (old and typeof(old.custom_data) == "table") and old.custom_data or {}
+	local newCustom = (new and typeof(new.custom_data) == "table") and new.custom_data or {}
+	for k, v in pairs(new) do
+		if k ~= "custom_data" then
+			if not deepEqual(old and old[k], v) then
+				table.insert(keys, tostring(k))
+			end
+		end
+	end
+	for k, v in pairs(newCustom) do
+		if not deepEqual(oldCustom[k], v) then
+			table.insert(keys, "custom_data." .. tostring(k))
+		end
+	end
+	for k in pairs(oldCustom) do
+		if newCustom[k] == nil then
+			table.insert(keys, "custom_data." .. tostring(k))
+		end
+	end
+	table.sort(keys)
+	return keys
+end
+
 local Agent = {}
 Agent.__index = Agent
 
@@ -82,8 +108,28 @@ function Agent:_sendStatus(force)
 	if not changed and not force and not heartbeatDue then
 		return
 	end
+
+	-- Причина отправки — в корень payload (проверено: бэкенд игнорирует
+	-- неизвестные поля, 200 OK).
+	local reason
+	local changedFields = nil
+	if not self.lastStatusData then
+		reason = "initial"
+	elseif changed then
+		reason = "data_changed"
+		changedFields = diffStatusKeys(self.lastStatusData, snapshot)
+	elseif force then
+		reason = "forced"
+	else
+		reason = "heartbeat"
+	end
+
 	self.lastStatusData = snapshot
 	self.lastStatusSendAt = tick()
+	data.update_reason = reason
+	if changedFields then
+		data.update_fields = changedFields
+	end
 	local ok, res = self.http:post("/game/update", data)
 	if not ok then
 		self:_log("ERROR", "status send failed:", tostring(res))
