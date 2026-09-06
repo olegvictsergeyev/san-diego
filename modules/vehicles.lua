@@ -360,23 +360,53 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 	local startX = root.Position.X
 	local targetX = startX + dx
 	local t0 = tick()
-	-- ФАЗА 0: быстрое выравнивание по полосе z (до 40 ст/с боком)
-	local aligned = math.abs(root.Position.Z - laneZ) < 0.5
-	while not aligned and tick() - t0 < 10 and s.root.Parent do
-		if isCancelled and isCancelled() then
-			self:_teardown()
-			return { success = false, error = "cancelled", data = { aligned = false } }
+	-- Курс: основная ось X + плавная коррекция к полосе поворотом руля.
+	-- Движение всегда вдоль продольной оси техники (LookVector), z меняется
+	-- только изменением курса — никакого бокового скольжения.
+	local function courseDir(p)
+		local dz = math.clamp((laneZ - p.Z) * 0.04, -0.4, 0.4)
+		return Vector3.new(dir, 0, dz).Unit
+	end
+	local function flatLook()
+		local look = root.CFrame.LookVector
+		local f = Vector3.new(look.X, 0, look.Z)
+		if f.Magnitude > 0.01 then
+			return f.Unit
 		end
-		local p = root.Position
+		return Vector3.new(dir ~= 0 and dir or 1, 0, 0)
+	end
+	local function yawErrTo(d)
+		return math.acos(math.clamp(flatLook():Dot(d), -1, 1))
+	end
+	local function holdY(p)
 		local gy = self:_groundY(s, p)
-		local vz = math.clamp((laneZ - p.Z) * 4, -40, 40)
-		local vy = math.clamp((gy + s.studs - p.Y) * 4, -10, 10)
-		if vy < 0 and p.Y < gy + s.studs + 0.3 then vy = math.max(vy, -2) end
-		pcall(function()
-			s.bv.Velocity = Vector3.new(0, vy, vz)
-		end)
-		aligned = math.abs(p.Z - laneZ) < 0.5 and s.root.AssemblyLinearVelocity.Magnitude < 8
-		task.wait(self.DT)
+		local vy = math.clamp((gy + s.studs - p.Y) * 4, -14, 14)
+		if vy < 0 and p.Y < gy + s.studs + 0.3 then
+			vy = math.max(vy, -2)
+		end
+		return vy
+	end
+	if dir ~= 0 then
+		-- ФАЗА 0: развернуться носом к курсу (руление с лёгким ходом)
+		local turned = false
+		while not turned and tick() - t0 < 12 and s.root.Parent do
+			if isCancelled and isCancelled() then
+				self:_teardown()
+				return { success = false, error = "cancelled", data = { aligned = false } }
+			end
+			local p = root.Position
+			local d = courseDir(p)
+			pcall(function()
+				s.ao.CFrame = CFrame.lookAt(p, p + d)
+			end)
+			local errYaw = yawErrTo(d)
+			local creep = errYaw > 0.6 and 4 or 14
+			pcall(function()
+				s.bv.Velocity = flatLook() * creep + Vector3.new(0, holdY(p), 0)
+			end)
+			turned = errYaw < 0.1
+			task.wait(self.DT)
+		end
 	end
 	pcall(function()
 		s.bv.Velocity = Vector3.zero
@@ -386,7 +416,24 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 		s.root.AssemblyLinearVelocity = Vector3.zero
 	end)
 	if dir == 0 then
-		-- x не передан: только встать в полосу и держать позицию
+		-- x не передан: встать в полосу боковым выравниванием и держать позицию
+		local aligned = math.abs(root.Position.Z - laneZ) < 0.5
+		while not aligned and tick() - t0 < 10 and s.root.Parent do
+			if isCancelled and isCancelled() then
+				self:_teardown()
+				return { success = false, error = "cancelled", data = { aligned = false } }
+			end
+			local p = root.Position
+			local vz = math.clamp((laneZ - p.Z) * 4, -40, 40)
+			pcall(function()
+				s.bv.Velocity = Vector3.new(0, holdY(p), vz)
+			end)
+			aligned = math.abs(p.Z - laneZ) < 0.5 and s.root.AssemblyLinearVelocity.Magnitude < 8
+			task.wait(self.DT)
+		end
+		pcall(function()
+			s.bv.Velocity = Vector3.zero
+		end)
 		self:_teardown()
 		return { success = true, data = { aligned = true, lane_z = laneZ, position = math.floor(root.Position.X) } }
 	end
@@ -394,7 +441,7 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 	local ACCEL, BRAKE_CMD, BRAKE_REAL = 60, 80, 65
 	local v, phase = 0, "accel"
 	local vmax, t300 = 0, nil
-	local stuckAt, stuckX = tick(), startX
+	local stuckAt, stuckDist = tick(), math.huge
 	local abortReason, brakeStartX = nil, nil
 	local timeout = math.abs(dx) / 200 + 40
 	while tick() - t0 < timeout and s.root.Parent do
@@ -404,11 +451,16 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 		end
 		local p = root.Position
 		local gy = self:_groundY(s, p)
-		-- препятствия впереди (низким и средним лучом)
+		-- курс и руление: поворот носа к желаемому направлению
+		local d = courseDir(p)
+		pcall(function()
+			s.ao.CFrame = CFrame.lookAt(p, p + d)
+		end)
+		local errYaw = yawErrTo(d)
+		-- препятствия впереди (низким и средним лучом вдоль курса)
 		if phase ~= "brake" then
-			local ahead = Vector3.new(24 * dir, 0, 0)
-			local b1 = workspace:Raycast(p + Vector3.new(0, 0.3, 0), ahead, s.rayParams)
-			local b2 = workspace:Raycast(p + Vector3.new(0, 1.6, 0), ahead, s.rayParams)
+			local b1 = workspace:Raycast(p + Vector3.new(0, 0.3, 0) + d * 6, d * 30, s.rayParams)
+			local b2 = workspace:Raycast(p + Vector3.new(0, 1.6, 0) + d * 6, d * 30, s.rayParams)
 			if b1 or b2 then
 				local hitName = "unknown"
 				pcall(function()
@@ -417,8 +469,8 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 				local shifted = false
 				for _, dz in ipairs({14, -14, 28, -28, 42, -42}) do
 					local tp = Vector3.new(p.X, p.Y, laneZ + dz)
-				local h1 = workspace:Raycast(tp + Vector3.new(0, 0.3, 0), Vector3.new(30 * dir, 0, 0), s.rayParams)
-				local h2 = workspace:Raycast(tp + Vector3.new(0, 1.6, 0), Vector3.new(30 * dir, 0, 0), s.rayParams)
+					local h1 = workspace:Raycast(tp + Vector3.new(0, 0.3, 0), Vector3.new(30 * dir, 0, 0), s.rayParams)
+					local h2 = workspace:Raycast(tp + Vector3.new(0, 1.6, 0), Vector3.new(30 * dir, 0, 0), s.rayParams)
 					if not h1 and not h2 then
 						laneZ = laneZ + dz
 						shifted = true
@@ -444,22 +496,23 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 			v = math.max(v - BRAKE_CMD * self.DT, 0)
 			if v <= 0 then break end
 		end
-		local vy = math.clamp((gy + s.studs - p.Y) * 4, -14, 14)
-		if vy < 0 and p.Y < gy + s.studs + 0.3 then vy = math.max(vy, -2) end
-		local vz = math.clamp((laneZ - p.Z) * 3, -40, 40)
+		-- тяга только вдоль продольной оси; при большом отклонении курса
+		-- эффективная скорость падает (cos) — техника сначала разворачивается
+		local ve = v * math.clamp(math.cos(errYaw), 0, 1)
 		pcall(function()
-			s.bv.Velocity = Vector3.new(dir * v, vy, vz)
+			s.bv.Velocity = flatLook() * ve + Vector3.new(0, holdY(p), 0)
 		end)
 		local speed = s.root.AssemblyLinearVelocity.Magnitude
 		-- сброс анти-чита/срыв сцепления: скорость рухнула при высокой команде
-		if phase ~= "brake" and v > 30 and speed < v * 0.35 then
-			abortReason = string.format("knock at v=%d", v)
+		if phase ~= "brake" and ve > 30 and speed < ve * 0.35 then
+			abortReason = string.format("knock at v=%d", math.floor(ve))
 			phase = "brake"
 		end
 		vmax = math.max(vmax, speed)
-		-- сторож застревания: команда есть, смещения нет
+		-- сторож застревания: команда есть, расстояние до цели не убывает
+		local targetDist = (Vector2.new(targetX, laneZ) - Vector2.new(p.X, p.Z)).Magnitude
 		if tick() - stuckAt >= 1.5 then
-			if v > 10 and math.abs(p.X - stuckX) < 1.5 then
+			if v > 10 and (stuckDist - targetDist) < 1.5 then
 				abortReason = "stuck/locked"
 				v = 0
 				pcall(function()
@@ -467,7 +520,7 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 				end)
 				break
 			end
-			stuckAt, stuckX = tick(), p.X
+			stuckAt, stuckDist = tick(), targetDist
 		end
 		task.wait(self.DT)
 	end
@@ -478,6 +531,10 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 	end)
 	local tStop = tick()
 	while s.root.AssemblyLinearVelocity.Magnitude > 2 and tick() - tStop < 4 and s.root.Parent do
+		pcall(function()
+			local p = s.root.Position
+			s.ao.CFrame = CFrame.lookAt(p, p + Vector3.new(dir, 0, 0))
+		end)
 		task.wait(0.1)
 	end
 	local pEnd = s.root.Position
