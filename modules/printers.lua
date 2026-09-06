@@ -22,6 +22,13 @@ Printers.PRINTER_NAME_PATTERN = "print"
 Printers.DISPLAY_ITEM_NAME = "Money Printer"
 -- Больше 50 принтеров персонажу не нужно (лимит расстановки)
 Printers.MAX_BUY = 50
+-- Пауза между покупками. Замерено на живом сервере: подтверждение выдачи
+-- Tool идёт за 0.11–0.16 с, серия из 8 покупок с паузой 0.15–0.8 с прошла
+-- без единого несрабатывания. 0.25 с — запас на сетевой джиттер (мобилка).
+Printers.BUY_PAUSE = 0.25
+-- Сколько ждём фактического появления принтера после нажатия, прежде чем
+-- считать покупку неудавшейся (нет денег / лаг сервера).
+Printers.BUY_CONFIRM_TIMEOUT = 3
 
 function Printers.new()
 	local self = setmetatable({}, Printers)
@@ -149,10 +156,9 @@ function Printers:canBuy(prompt)
 	return dist <= (prompt.MaxActivationDistance or 10)
 end
 
--- Одна покупка: прямой ввод в промпт (аналог удержания E).
 function Printers:_pressPrompt(prompt)
 	prompt:InputHoldBegin()
-	task.wait((tonumber(prompt.HoldDuration) or 0) + 0.3)
+	task.wait((tonumber(prompt.HoldDuration) or 0) + 0.05)
 	prompt:InputHoldEnd()
 end
 
@@ -182,10 +188,21 @@ function Printers:buyPrinters(count, isCancelled)
 		end
 
 		self:_pressPrompt(prompt)
-		task.wait(1) -- серверу нужно время выдать Tool; заодно не спамим покупками
-
-		local nowTotal = self:getInventory().printers_total
-		if nowTotal <= startTotal + bought then
+		-- Ждём фактического появления принтера (быстрее фиксированной паузы):
+		-- сервер подтверждает за ~0.1–0.2 с, при лагах — до BUY_CONFIRM_TIMEOUT.
+		local confirmed = false
+		local waitStart = tick()
+		while tick() - waitStart < self.BUY_CONFIRM_TIMEOUT do
+			task.wait(0.1)
+			if isCancelled and isCancelled() then
+				return { success = false, error = "cancelled", bought = bought }
+			end
+			if self:getInventory().printers_total > startTotal + bought then
+				confirmed = true
+				break
+			end
+		end
+		if not confirmed then
 			-- Покупка не прошла: обычно не хватило денег (промпт молча отказывает).
 			return {
 				success = false,
@@ -193,7 +210,8 @@ function Printers:buyPrinters(count, isCancelled)
 				bought = bought,
 			}
 		end
-		bought = nowTotal - startTotal
+		bought = self:getInventory().printers_total - startTotal
+		task.wait(self.BUY_PAUSE)
 	end
 
 	return {
