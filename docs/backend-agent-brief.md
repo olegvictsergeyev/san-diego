@@ -42,6 +42,9 @@ Tracked-поля для игры `san-diego`:
 - `balance` (number)
 - `current_command` (string)
 - `command_started_at` (string)
+- `district` (string) — район карты по `workspace.Map.Static.Locations`: `SanDiego` (город, x −1531…709), `Border` (погранполоса, x 2430…2775), `OldTown` (x 3486…7402); `unknown` — вне зон.
+- `poi` (string) — ближайшая именованная точка из `workspace.Nodes.Waypoints` (Bank, GunStore, BlackMarket, ElCapo, Apartments, Docks, Warehouse, Gym, Petrol и др., ~24 шт.); пустая строка, если точки недоступны.
+- `poi_dist` (number) — дистанция до ближайшего POI по XZ в стадах; `-1`, если недоступно.
 
 ## Переподключение после дисконнекта
 

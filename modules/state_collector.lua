@@ -3,6 +3,10 @@ local Players = game:GetService("Players")
 local StateCollector = {}
 StateCollector.__index = StateCollector
 
+-- Гео-данные карты (San Diego): районы — из workspace.Map.Static.Locations
+-- (bbox по крупным частям), POI — из workspace.Nodes.Waypoints.
+-- Кэшируется при первом успешном чтении; перечитывается при смене числа детей.
+
 local BALANCE_CANDIDATES = {
 	"Cash", "Money", "Balance", "Credits", "Gold", "Coins",
 	"Tokens", "Points", "Gems", "Bucks", "Dollars", "Bank",
@@ -296,6 +300,78 @@ function StateCollector:getServerId()
 	return game.JobId or "unknown"
 end
 
+-- Собирает/возвращает кэш гео-данных карты: { zones = {name -> bbox}, pois = {{name,x,z}...} }
+function StateCollector:_getGeoCache()
+	local locations = workspace:FindFirstChild("Map")
+	locations = locations and locations:FindFirstChild("Static")
+	locations = locations and locations:FindFirstChild("Locations")
+	local waypoints = workspace:FindFirstChild("Nodes")
+	waypoints = waypoints and waypoints:FindFirstChild("Waypoints")
+	if not (locations and waypoints) then
+		return nil
+	end
+	local zoneCount, poiCount = #locations:GetChildren(), #waypoints:GetChildren()
+	if self._geo and self._geo.zoneCount == zoneCount and self._geo.poiCount == poiCount then
+		return self._geo
+	end
+	local zones = {}
+	for _, zone in ipairs(locations:GetChildren()) do
+		local minX, maxX, minZ, maxZ = math.huge, -math.huge, math.huge, -math.huge
+		for _, part in ipairs(zone:GetDescendants()) do
+			if part:IsA("BasePart") and part.Size.Magnitude > 50 then
+				minX = math.min(minX, part.Position.X - part.Size.X / 2)
+				maxX = math.max(maxX, part.Position.X + part.Size.X / 2)
+				minZ = math.min(minZ, part.Position.Z - part.Size.Z / 2)
+				maxZ = math.max(maxZ, part.Position.Z + part.Size.Z / 2)
+			end
+		end
+		if minX ~= math.huge then
+			zones[zone.Name] = { minX = minX, maxX = maxX, minZ = minZ, maxZ = maxZ }
+		end
+	end
+	local pois = {}
+	for _, wp in ipairs(waypoints:GetChildren()) do
+		local part = wp:IsA("BasePart") and wp or wp.PrimaryPart or wp:FindFirstChildWhichIsA("BasePart", true)
+		if part then
+			table.insert(pois, { name = wp.Name, x = part.Position.X, z = part.Position.Z })
+		end
+	end
+	self._geo = { zones = zones, pois = pois, zoneCount = zoneCount, poiCount = poiCount }
+	return self._geo
+end
+
+-- Район по позиции (SanDiego / OldTown / Border) или nil вне зон.
+function StateCollector:getDistrict(pos)
+	if not pos then return nil end
+	local geo = self:_getGeoCache()
+	if not geo then return nil end
+	for name, box in pairs(geo.zones) do
+		if pos.X >= box.minX and pos.X <= box.maxX and pos.Z >= box.minZ and pos.Z <= box.maxZ then
+			return name
+		end
+	end
+	return nil
+end
+
+-- Ближайший POI по XZ-дистанции: name, dist (или nil).
+function StateCollector:getNearestPoi(pos)
+	if not pos then return nil end
+	local geo = self:_getGeoCache()
+	if not geo then return nil end
+	local bestName, bestDist = nil, math.huge
+	for _, poi in ipairs(geo.pois) do
+		local dx, dz = pos.X - poi.x, pos.Z - poi.z
+		local dist = math.sqrt(dx * dx + dz * dz)
+		if dist < bestDist then
+			bestName, bestDist = poi.name, dist
+		end
+	end
+	if bestName then
+		return bestName, math.floor(bestDist)
+	end
+	return nil
+end
+
 function StateCollector:getPlaceId()
 	return tostring(game.PlaceId or 0)
 end
@@ -311,12 +387,22 @@ function StateCollector:getAll(custom)
 		team = self:getTeam(),
 		balance = self:getBalance(),
 		action = self._action or "",
+		district = pos and self:getDistrict(pos) or "unknown",
+		poi = "",
+		poi_dist = -1,
 		time_1 = self:getTimerElapsed("time_1"),
 		time_2 = self:getTimerElapsed("time_2"),
 		time_3 = self:getTimerElapsed("time_3"),
 		time_4 = self:getTimerElapsed("time_4"),
 		time_5 = self:getTimerElapsed("time_5"),
 	}
+	if pos then
+		local poiName, poiDist = self:getNearestPoi(pos)
+		if poiName then
+			customData.poi = poiName
+			customData.poi_dist = poiDist
+		end
+	end
 
 	if self._commandName then
 		customData.current_command = self._commandName

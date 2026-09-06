@@ -49,7 +49,10 @@ san-diego/
        "team": "Civilian",
        "balance": 1250,
        "current_command": "move_x",
-       "command_started_at": "2026-08-27T15:30:00+03:00"
+       "command_started_at": "2026-08-27T15:30:00+03:00",
+       "district": "OldTown",
+       "poi": "BlackMarket",
+       "poi_dist": 210
      }
    }
    ```
