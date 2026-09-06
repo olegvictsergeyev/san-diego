@@ -1,16 +1,15 @@
 --[[
     San Diego Agent — UI Panel
     ==========================
-    Модуль управления агентом через Orion UI.
-    Содержит CONFIG и логику запуска/остановки.
+    Содержит CONFIG и логику запуска/остановки агента.
+    Вместо полноценного UI (Orion) показывает только компактный
+    бейдж с номером версии в левом нижнем углу.
     Запускается из final/agent.lua.
 ]]
 
-local Players = game:GetService("Players")
-
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-    version = "1.19.6",
+    version = "1.19.7",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -59,7 +58,6 @@ local CONFIG = {
             popup_closer = base .. "/modules/popup_closer.lua",
             compat = base .. "/modules/compat.lua",
             disconnect_watcher = base .. "/modules/disconnect_watcher.lua",
-            ui_toggle = base .. "/modules/ui_toggle.lua",
             autoexec = base .. "/modules/autoexec.lua",
             afk = base .. "/modules/afk.lua",
         }
@@ -85,9 +83,6 @@ local CONFIG = {
 
     -- true при запуске через loadstring (script == nil), иначе false
     useRemoteModules = (script == nil),
-
-    -- true — показать панель Orion; false — запустить агента сразу
-    showUI = true,
 
     -- AFK-режим: периодическое незаметное действие, чтобы не выкидывало из игры
     afkEnabled = true,
@@ -129,7 +124,6 @@ local PrivateServer = loadModule("private_server")
 local PopupCloser = loadModule("popup_closer")
 local Compat = loadModule("compat")
 local DisconnectWatcher = loadModule("disconnect_watcher")
-local ToggleUI = loadModule("ui_toggle")
 local Autoexec = loadModule("autoexec")
 local CommandEngine = loadModule("command_engine")
 local ResultStore = loadModule("result_store")
@@ -142,9 +136,7 @@ local privateServer = PrivateServer.new({
 })
 
 local currentAgent = nil
-local currentMainGui = nil
 local autoexec = Autoexec.new()
-local stateReader = StateCollector.new(CONFIG.balancePath, CONFIG.version)
 local popupCloser = PopupCloser.new(Compat)
 
 local coreStarted = false
@@ -228,26 +220,6 @@ local function stopAgent()
     end)
 end
 
-local function getPosition()
-    local player = Players.LocalPlayer
-    if not player then return Vector3.new(0, 0, 0) end
-    local character = player.Character
-    if not character then return Vector3.new(0, 0, 0) end
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if hrp and hrp:IsA("BasePart") then
-        return hrp.Position
-    end
-    return Vector3.new(0, 0, 0)
-end
-
-local function getCoord(axis)
-    local pos = getPosition()
-    if axis == "X" then return pos.X end
-    if axis == "Y" then return pos.Y end
-    if axis == "Z" then return pos.Z end
-    return 0
-end
-
 local function getUiParent()
     local hui = Compat.gethui()
     if typeof(hui) == "Instance" and hui:IsA("CoreGui") then
@@ -256,104 +228,13 @@ local function getUiParent()
     return game.CoreGui
 end
 
-local function copyToClipboard(text)
-    Compat.setClipboard(text)
-    print("[SanDiegoAgent][UI] Скопировано:", text)
-end
-
-local function loadOrion()
-    warn("[SanDiegoAgent][UI] loading Orion")
-    local ok, Orion = pcall(function()
-        return loadstring(game:HttpGet("https://raw.githubusercontent.com/OrionLibrary/Orion/main/source.lua"))()
-    end)
-    if not ok then
-        warn("[SanDiegoAgent][UI] Failed to load Orion:", tostring(Orion))
-        return nil
-    end
-    warn("[SanDiegoAgent][UI] Orion loaded")
-    return Orion
-end
-
-local function findMainPage(gui)
-    if not gui then return nil end
-    for _, desc in ipairs(gui:GetDescendants()) do
-        if desc.Name == "newPageГлавное" then
-            return desc
-        end
-    end
-    return nil
-end
-
-local function findOrionGui(preExisting)
-    local function searchRoot(root)
-        if preExisting then
-            for _, sg in ipairs(root:GetChildren()) do
-                if sg:IsA("ScreenGui") and not preExisting[sg] then
-                    return sg
-                end
-            end
-        end
-        for _, sg in ipairs(root:GetChildren()) do
-            if sg:IsA("ScreenGui") then
-                if sg.Name == "San Diego Agent" then
-                    return sg
-                end
-                for _, desc in ipairs(sg:GetDescendants()) do
-                    if (desc:IsA("TextLabel") or desc:IsA("TextButton") or desc:IsA("TextBox")) and desc.Text == "San Diego Agent" then
-                        return sg
-                    end
-                end
-            end
-        end
-        return nil
-    end
-
-    local found = searchRoot(game.CoreGui)
-    if found then
-        return found
-    end
-    found = searchRoot(Compat.gethui())
-    if found then
-        return found
-    end
-    warn("[SanDiegoAgent][UI] Orion ScreenGui not found")
-    return nil
-end
-
-local function updateInfoLabels()
-    local gui = currentMainGui
-    if not gui then return end
-    local page = findMainPage(gui)
-    if not page then return end
-
-    local pos = getPosition()
-    local bal = stateReader:getBalance()
-
-    for _, child in ipairs(page:GetChildren()) do
-        if child.Name == "labelFrame" then
-            local txt = child:FindFirstChild("txtLabel")
-            if txt and txt:IsA("TextLabel") then
-                if txt.Text:sub(1, 2) == "X:" then
-                    txt.Text = string.format("X: %.2f", pos.X)
-                elseif txt.Text:sub(1, 2) == "Y:" then
-                    txt.Text = string.format("Y: %.2f", pos.Y)
-                elseif txt.Text:sub(1, 2) == "Z:" then
-                    txt.Text = string.format("Z: %.2f", pos.Z)
-                elseif txt.Text:sub(1, 8) == "Balance:" then
-                    txt.Text = "Balance: " .. tostring(bal)
-                end
-            end
-        end
-    end
-end
-
 local function cleanupExistingUi()
     local hui = Compat.gethui()
     for _, root in ipairs({ game.CoreGui, hui }) do
         for _, sg in ipairs(root:GetChildren()) do
             if sg:IsA("ScreenGui") then
                 local name = sg.Name
-                if name == "San Diego Agent" or name:find("SanDiegoAgentToggle") then
+                if name == "San Diego Agent" or name:find("SanDiegoAgent") then
                     pcall(function()
                         sg:Destroy()
                     end)
@@ -363,93 +244,48 @@ local function cleanupExistingUi()
     end
 end
 
-local function buildUI()
-    warn("[SanDiegoAgent][UI] buildUI() start")
-    local Orion = loadOrion()
-    if not Orion then
-        warn("[SanDiegoAgent][UI] buildUI aborted: Orion not loaded")
-        return
-    end
-
-    warn("[SanDiegoAgent][UI] cleaning up existing UI")
+-- Компактный бейдж с версией в левом нижнем углу (вместо Orion-панели).
+local function buildVersionBadge()
+    warn("[SanDiegoAgent][UI] buildVersionBadge() start")
     cleanupExistingUi()
 
-    warn("[SanDiegoAgent][UI] collecting existing ScreenGuis")
-    local hui = Compat.gethui()
-    local existingGuis = {}
-    for _, sg in ipairs(game.CoreGui:GetChildren()) do
-        if sg:IsA("ScreenGui") then
-            existingGuis[sg] = true
-        end
-    end
-    for _, sg in ipairs(hui:GetChildren()) do
-        if sg:IsA("ScreenGui") then
-            existingGuis[sg] = true
-        end
-    end
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "SanDiegoAgentVersion"
+    screenGui.ResetOnSpawn = false
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.Parent = getUiParent()
 
-    warn("[SanDiegoAgent][UI] creating Orion window")
-    local window = Orion:CreateOrion("San Diego Agent")
-    warn("[SanDiegoAgent][UI] Orion window created")
+    local frame = Instance.new("Frame")
+    frame.Name = "VersionBadge"
+    frame.Size = UDim2.new(0, 110, 0, 44)
+    frame.Position = UDim2.new(0, 12, 1, -56)
+    frame.AnchorPoint = Vector2.new(0, 1)
+    frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    frame.BackgroundTransparency = 0.2
+    frame.BorderSizePixel = 0
+    frame.Parent = screenGui
 
-    task.wait(0.1)
-    currentMainGui = findOrionGui(existingGuis)
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = frame
 
-    if currentMainGui then
-        warn("[SanDiegoAgent][UI] main gui found:", currentMainGui:GetFullName())
-        local ok, err = pcall(function()
-            ToggleUI.new(currentMainGui, {
-                parent = getUiParent(),
-                initialVisible = true,
-            })
-        end)
-        if not ok then
-            warn("[SanDiegoAgent][UI] ToggleUI failed:", tostring(err))
-        end
-    else
-        warn("[SanDiegoAgent][UI] Orion ScreenGui not found, toggle will not be created")
-    end
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(255, 255, 255)
+    stroke.Transparency = 0.6
+    stroke.Thickness = 1
+    stroke.Parent = frame
 
-    warn("[SanDiegoAgent][UI] creating main tab")
-    local tabMain = window:CreateSection("Главное")
+    local label = Instance.new("TextLabel")
+    label.Name = "Version"
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = "v" .. tostring(CONFIG.version)
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.TextSize = 16
+    label.Font = Enum.Font.GothamBold
+    label.Parent = frame
 
-    local pos = getPosition()
-    local bal = stateReader:getBalance()
-
-    tabMain:TextLabel(string.format("X: %.2f", pos.X))
-    tabMain:TextButton("Copy X", "Copy X coordinate", function()
-        copyToClipboard(string.format("%.2f", getCoord("X")))
-    end)
-
-    tabMain:TextLabel(string.format("Y: %.2f", pos.Y))
-    tabMain:TextButton("Copy Y", "Copy Y coordinate", function()
-        copyToClipboard(string.format("%.2f", getCoord("Y")))
-    end)
-
-    tabMain:TextLabel(string.format("Z: %.2f", pos.Z))
-    tabMain:TextButton("Copy Z", "Copy Z coordinate", function()
-        copyToClipboard(string.format("%.2f", getCoord("Z")))
-    end)
-
-    tabMain:TextLabel("Balance: " .. tostring(bal))
-
-    -- Автозапуск агента
-    warn("[SanDiegoAgent][UI] starting agent from buildUI")
-    startAgent()
-
-    -- Автозакрытие стартовых попапов (StarterPack и др.)
-    warn("[SanDiegoAgent][UI] starting popup closer")
-    popupCloser:start()
-
-    -- Обновление координат и баланса в UI
-    warn("[SanDiegoAgent][UI] starting UI update loop")
-    task.spawn(function()
-        while true do
-            updateInfoLabels()
-            task.wait(0.5)
-        end
-    end)
-    warn("[SanDiegoAgent][UI] buildUI() finished")
+    warn("[SanDiegoAgent][UI] version badge built: " .. label.Text)
 end
 
 local function runCore()
@@ -460,15 +296,11 @@ local function runCore()
 	end
 	coreStarted = true
 
-	if CONFIG.showUI then
-		warn("[SanDiegoAgent][UI] showUI=true, building UI")
-		buildUI()
-	else
-		warn("[SanDiegoAgent][UI] showUI=false, starting agent directly")
-		startAgent()
-		popupCloser:start()
-		installAutoexec()
-	end
+	warn("[SanDiegoAgent][UI] building version badge and starting agent")
+	buildVersionBadge()
+	startAgent()
+	popupCloser:start()
+	installAutoexec()
 
 	-- Фоновый поток для обработки флага остановки
 	warn("[SanDiegoAgent][UI] starting stop-flag watcher")
