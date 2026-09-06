@@ -61,12 +61,28 @@ end
 
 function Agent:_sendStatus(force)
 	local data = self.state:getAll(self.config.customData)
-	local changed = not self.lastStatusData or not deepEqual(self.lastStatusData, data)
-	local heartbeatDue = (tick() - self.lastStatusSendAt) >= 300
+	-- Для сравнения исключаем time_1..time_5: это «прошло секунд с таймера»,
+	-- значения меняются каждую секунду и иначе форсируют отправку каждый тик
+	-- statusInterval. Реальные значения таймеров уходят в data при отправке.
+	local snapshot = {}
+	for k, v in pairs(data) do
+		snapshot[k] = v
+	end
+	if typeof(snapshot.custom_data) == "table" then
+		local cd = {}
+		for k, v in pairs(snapshot.custom_data) do
+			if k ~= "time_1" and k ~= "time_2" and k ~= "time_3" and k ~= "time_4" and k ~= "time_5" then
+				cd[k] = v
+			end
+		end
+		snapshot.custom_data = cd
+	end
+	local changed = not self.lastStatusData or not deepEqual(self.lastStatusData, snapshot)
+	local heartbeatDue = (tick() - self.lastStatusSendAt) >= 60
 	if not changed and not force and not heartbeatDue then
 		return
 	end
-	self.lastStatusData = data
+	self.lastStatusData = snapshot
 	self.lastStatusSendAt = tick()
 	local ok, res = self.http:post("/game/update", data)
 	if not ok then
