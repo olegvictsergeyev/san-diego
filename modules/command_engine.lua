@@ -673,20 +673,20 @@ function CommandEngine:_moveAxis(axis, payload)
 	local sign = value >= 0 and 1 or -1
 	local _, startYaw = hrp.CFrame:ToEulerAnglesYXZ()
 
-	-- Базовые шаги подобраны для плавности (max speed = прежняя скорость):
-	-- X/Z: 12 студий за шаг, пауза 0.06 с.
-	-- Y: 60 студий за шаг, пауза 0.3 с.
+	-- Базовые шаги: номинальная скорость ~60 студий/с — человечески
+	-- правдоподобная, чтобы не триггерить античит San Diego
+	-- (за 120–180 ст/с игровой AC сбрасывает данные аккаунта — проверено на тесте).
+	-- X/Z: 6 студий за шаг, пауза 0.1 с. Y: 15 студий за шаг, пауза 0.25 с.
 	-- speed 1..10 масштабирует только длину шага, поэтому min в 10 раз медленнее.
-	-- ВАЖНО: шаг/пауза держат номинальную скорость ~200 студий/с, но число
-	-- физических операций и репликаций в 3 раза меньше, чем при 4/0.02 —
-	-- это критично для слабых устройств (телефоны с 4+ инстансами).
+	-- ВАЖНО: никогда не анкорить персонажа во время движения — перемещение
+	-- без физики мгновенно флагается античитом.
 	local baseStep, baseWait
 	if axis == "y" then
-		baseStep = 60
-		baseWait = 0.3
+		baseStep = 15
+		baseWait = 0.25
 	else
-		baseStep = 12
-		baseWait = 0.06
+		baseStep = 6
+		baseWait = 0.1
 	end
 
 	local stepSize = baseStep * sign * (speed / 10)
@@ -829,10 +829,10 @@ function CommandEngine:_moveTo(payload)
 		}
 	end
 
-	-- Те же параметры, что и в _moveAxis: 12 студий за шаг, пауза 0.06 с.
-	-- Скорость ~200 студий/с, но в 3 раза меньше физических операций (см. _moveAxis).
-	local baseStep = 12
-	local baseWait = 0.06
+	-- Те же параметры, что и в _moveAxis: 6 студий за шаг, пауза 0.1 с.
+	-- Номинальная скорость ~60 студий/с — безопасно для античита (см. _moveAxis).
+	local baseStep = 6
+	local baseWait = 0.1
 	local stepSize = baseStep * (speed / 10)
 	local waitTime = baseWait
 	local steps = math.max(1, math.floor(dist / stepSize))
