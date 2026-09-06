@@ -298,6 +298,16 @@ function Vehicles:navigate(dx, dz, isCancelled)
 	local travelled = math.sqrt((s.root.Position.X - startX) ^ 2 + (s.root.Position.Z - startZ) ^ 2)
 	local knocks = s.knocks
 	if not s.navArrived then
+		-- таймаут: сессию НЕ оставляем — иначе её цикл продолжит писать
+		-- скорости и конфликтовать со следующими командами
+		if resumeLevel then
+			s.mode = "hover"
+			s.studs = resumeLevel * self.HOVER_STEP
+			s.holdX = s.root.Position.X
+			s.holdZ = s.root.Position.Z
+			return { success = false, error = "nav timeout", data = { travelled = math.floor(travelled), knocks = knocks, resumed = "hover", height = resumeLevel } }
+		end
+		self:_teardown()
 		return { success = false, error = "nav timeout", data = { travelled = math.floor(travelled), knocks = knocks } }
 	end
 	if resumeLevel then
