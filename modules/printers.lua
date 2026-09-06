@@ -272,14 +272,16 @@ function Printers:detectRoom()
 	return nil, "character is not inside any apartment room"
 end
 
--- Внутренние границы комнаты: рейкасты от центра региона по 4 сторонам
--- на нескольких высотах (берём самое дальнее попадание — мебель ближе стен).
--- Если луч вышел через проём/не попал — граница берётся от региона с запасом.
+-- Внутренние границы комнаты.
+-- Основной источник — структурные стены: тонкие длинные CanCollide-части
+-- вдоль грани региона (мебель таким фильтром не проходит). Если на стороне
+-- стены не нашлось — фолбэк: рейкасты от центра региона по 4 сторонам
+-- (берём самое дальнее попадание), затем граница региона с запасом.
 function Printers:_interiorBounds(region)
 	local rp, rs = region.Position, region.Size
+	local player = self:_player()
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
-	local player = self:_player()
 	if player and player.Character then
 		params.FilterDescendantsInstances = {player.Character}
 	end
@@ -287,7 +289,37 @@ function Printers:_interiorBounds(region)
 	local floorY = ray and ray.Position.Y or (rp.Y - rs.Y / 2)
 	local center = Vector3.new(rp.X, floorY + 1.5, rp.Z)
 	local maxRay = math.max(rs.X, rs.Z) + 10
-	local function face(dir)
+
+	local function comp(v, axis)
+		if axis == "X" then return v.X end
+		if axis == "Y" then return v.Y end
+		return v.Z
+	end
+
+	-- стены ищем по всему юниту (родительская цепочка региона ведёт к модели)
+	local unit = region:FindFirstAncestorOfClass("Model") or region.Parent
+	local function wallFaceFromUnit(axis, side)
+		local longAxis = axis == "X" and "Z" or "X"
+		local edge = side == "min" and (comp(rp, axis) - comp(rs, axis) / 2)
+			or (comp(rp, axis) + comp(rs, axis) / 2)
+		local best = nil
+		for _, p in ipairs(unit:GetDescendants()) do
+			if p:IsA("BasePart") and p.CanCollide then
+				local ps, pp = p.Size, p.Position
+				if comp(ps, axis) <= 2 and comp(ps, longAxis) >= 8 and ps.Y >= 4
+					and math.abs(comp(pp, axis) - edge) < 3 then
+					local face = side == "min" and (comp(pp, axis) + comp(ps, axis) / 2)
+						or (comp(pp, axis) - comp(ps, axis) / 2)
+					if not best or (side == "min" and face > best) or (side == "max" and face < best) then
+						best = face
+					end
+				end
+			end
+		end
+		return best
+	end
+
+	local function faceRay(dir)
 		local best = nil
 		for h = 0.6, 2.6, 1 do
 			local origin = Vector3.new(center.X, floorY + h, center.Z)
@@ -301,16 +333,39 @@ function Printers:_interiorBounds(region)
 		end
 		return best
 	end
+
 	local margin = 0.6
-	local minXD, maxXD = face(Vector3.new(-1, 0, 0)), face(Vector3.new(1, 0, 0))
-	local minZD, maxZD = face(Vector3.new(0, 0, -1)), face(Vector3.new(0, 0, 1))
+	local minXW, maxXW = wallFaceFromUnit("X", "min"), wallFaceFromUnit("X", "max")
+	local minZW, maxZW = wallFaceFromUnit("Z", "min"), wallFaceFromUnit("Z", "max")
+	local minXD, maxXD = faceRay(Vector3.new(-1, 0, 0)), faceRay(Vector3.new(1, 0, 0))
+	local minZD, maxZD = faceRay(Vector3.new(0, 0, -1)), faceRay(Vector3.new(0, 0, 1))
+	local margin = 0.6
+	-- грани региона по осям
+	local regionMinX, regionMaxX = rp.X - rs.X / 2, rp.X + rs.X / 2
+	local regionMinZ, regionMaxZ = rp.Z - rs.Z / 2, rp.Z + rs.Z / 2
 	return {
-		minX = minXD and (center.X - minXD + margin) or (rp.X - rs.X / 2 + margin),
-		maxX = maxXD and (center.X + maxXD - margin) or (rp.X + rs.X / 2 - margin),
-		minZ = minZD and (center.Z - minZD + margin) or (rp.Z - rs.Z / 2 + margin),
-		maxZ = maxZD and (center.Z + maxZD - margin) or (rp.Z + rs.Z / 2 - margin),
+		minX = minXW or (minXD and (center.X - minXD + margin) or (regionMinX + margin)),
+		maxX = maxXW or (maxXD and (center.X + maxXD - margin) or (regionMaxX - margin)),
+		minZ = minZW or (minZD and (center.Z - minZD + margin) or (regionMinZ + margin)),
+		maxZ = maxZW or (maxZD and (center.Z + maxZD - margin) or (regionMaxZ - margin)),
 		floorY = floorY,
 	}
+end
+
+-- Валидация точки (XZ): рейкаст вниз — должно быть чистое место
+-- (пол или уже стоящий принтер ~1.2 высотой). Мебель (dy > 1.3) отсекается.
+function Printers:_isFreeSpot(x, z, floorY)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local player = self:_player()
+	if player and player.Character then
+		params.FilterDescendantsInstances = {player.Character}
+	end
+	local hit = workspace:Raycast(Vector3.new(x, floorY + 2, z), Vector3.new(0, -3, 0), params)
+	if not hit then
+		return true -- пусто (на всякий случай считаем свободным)
+	end
+	return (hit.Position.Y - floorY) <= 1.3
 end
 
 -- Число уже стоящих принтеров (моделей с MoneyPrinterId) в комнате.
@@ -439,6 +494,7 @@ function Printers:buildGrid(room, maxTotal)
 	local step = self.GRID_STEP
 	local margin = self.GRID_EDGE_MARGIN
 	local cells = {}
+	local skipped = 0
 	local row = 0
 	while #cells < maxTotal do
 		local cellA = wallFace + intoRoom * (margin + row * step)
@@ -450,6 +506,7 @@ function Printers:buildGrid(room, maxTotal)
 			break
 		end
 		local col = 0
+		local rowCells = 0
 		while #cells < maxTotal do
 			local cellB = cornerB - leftOnBSign * (margin + col * step)
 			-- не пересекаем правый угол
@@ -458,22 +515,29 @@ function Printers:buildGrid(room, maxTotal)
 			local x = axis == "x" and cellA or cellB
 			local z = axis == "x" and cellB or cellA
 			local forwardVec = axis == "x" and Vector3.new(sign, 0, 0) or Vector3.new(0, 0, sign)
-			table.insert(cells, {
-				x = x, z = z,
-				charX = x - forwardVec.X * self.PLACE_FORWARD,
-				charZ = z - forwardVec.Z * self.PLACE_FORWARD,
-				forward = forwardVec,
-				row = row, col = col,
-			})
+			-- валидация: и под принтер, и под персонажа должно быть свободно
+			if self:_isFreeSpot(x, z, b.floorY)
+				and self:_isFreeSpot(x - forwardVec.X * self.PLACE_FORWARD, z - forwardVec.Z * self.PLACE_FORWARD, b.floorY) then
+				table.insert(cells, {
+					x = x, z = z,
+					charX = x - forwardVec.X * self.PLACE_FORWARD,
+					charZ = z - forwardVec.Z * self.PLACE_FORWARD,
+					forward = forwardVec,
+					row = row, col = col,
+				})
+				rowCells = rowCells + 1
+			else
+				skipped = skipped + 1
+			end
 			col = col + 1
 		end
 		row = row + 1
-		if col == 0 then
+		if rowCells == 0 and col == 0 then
 			-- по оси B даже первый ряд не поместился
 			break
 		end
 	end
-	return cells, { axis = axis, wallFace = wallFace, bounds = b }
+	return cells, { axis = axis, wallFace = wallFace, bounds = b, skipped = skipped }
 end
 
 -- Размещает до maxTotal принтеров сеткой от левого угла стены.
