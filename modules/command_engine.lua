@@ -362,6 +362,19 @@ function CommandEngine:getCommandsSpec()
 			params = {},
 		},
 		{
+			name = "update_agent",
+			description = "Обновить агента до актуальной версии: штатная остановка и перезапуск загрузчика с GitHub",
+			params = {
+				delay = {
+					type = "integer",
+					required = false,
+					min = 0,
+					max = 300,
+					description = "Задержка перед перезапуском в секундах (по умолчанию 5)",
+				},
+			},
+		},
+		{
 			name = "afk",
 			description = "Управление AFK-режимом: включить/выключить или задать интервал",
 			params = {
@@ -2877,6 +2890,61 @@ function CommandEngine:_cancelCurrent()
 	return { success = true, data = { cancelledCommandId = self.currentCommandId } }
 end
 
+-- Обновление агента «по воздуху»: штатная остановка через флаг StopSanDiegoAgent
+-- (подхватывает ui_panel watcher) и повторный запуск загрузчика с GitHub.
+-- Команда возвращается немедленно со статусом scheduled; реальный перезапуск
+-- происходит в фоне через delay секунд — результат команды успевает уйти на бэкенд.
+function CommandEngine:_updateAgentCommand(payload)
+	if typeof(getgenv) ~= "function" then
+		return { success = false, error = "getgenv is not available in this environment" }
+	end
+	if typeof(loadstring) ~= "function" then
+		return { success = false, error = "loadstring is not available in this environment" }
+	end
+
+	local delay = 5
+	if payload and payload.delay ~= nil then
+		if typeof(payload.delay) ~= "number" or payload.delay % 1 ~= 0 then
+			return { success = false, error = "param 'delay' must be an integer" }
+		end
+		delay = math.clamp(payload.delay, 0, 300)
+	end
+
+	local loaderUrl = self.privateServer and tostring(self.privateServer.loaderUrl) or nil
+	if not loaderUrl or loaderUrl == "" then
+		return { success = false, error = "loader url not configured" }
+	end
+
+	task.spawn(function()
+		task.wait(delay)
+		local genv = getgenv()
+		warn("[SanDiegoAgent][CommandEngine] update_agent: stopping agent for reload")
+		genv.StopSanDiegoAgent = true
+		-- Ждём фактической остановки (watcher в ui_panel обрабатывает флаг).
+		local waited = 0
+		while genv.SanDiegoAgentRunning and waited < 15 do
+			task.wait(0.2)
+			waited = waited + 0.2
+		end
+		if genv.SanDiegoAgentRunning then
+			warn("[SanDiegoAgent][CommandEngine] update_agent: agent did not stop in 15s, aborting reload to avoid double start")
+			genv.StopSanDiegoAgent = false
+			return
+		end
+		task.wait(0.5)
+		genv.StopSanDiegoAgent = false
+		warn("[SanDiegoAgent][CommandEngine] update_agent: reloading " .. loaderUrl)
+		local ok, err = pcall(function()
+			loadstring(game:HttpGet(loaderUrl .. "?nocache=" .. tostring(tick())))()
+		end)
+		if not ok then
+			warn("[SanDiegoAgent][CommandEngine] update_agent: reload failed: " .. tostring(err))
+		end
+	end)
+
+	return { success = true, data = { update = "scheduled", delay = delay, loader = loaderUrl } }
+end
+
 function CommandEngine:_afkCommand(payload)
 	if not self.afk then
 		return { success = false, error = "AFK module not available" }
@@ -3377,6 +3445,8 @@ function CommandEngine:execute(command)
 		result = self:_joinPrivateServer(payload)
 	elseif name == "cancel" then
 		result = self:_cancelCurrent()
+	elseif name == "update_agent" then
+		result = self:_updateAgentCommand(payload)
 	elseif name == "afk" then
 		result = self:_afkCommand(payload)
 	elseif name == "set_action" then

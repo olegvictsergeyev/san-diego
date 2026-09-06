@@ -220,6 +220,12 @@ POST /commands/{id}/status
       }
     },
     {
+      "name": "update_agent",
+      "params": {
+        "delay": { "type": "number", "min": 0, "max": 300 }
+      }
+    },
+    {
       "name": "afk",
       "params": {
         "enabled": { "type": "string", "min": 2, "max": 5 },
