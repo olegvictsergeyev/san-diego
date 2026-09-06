@@ -10,13 +10,14 @@ Vehicles.__index = Vehicles
 --   над поверхностью (рейкаст). 10 = +10 ст — максимум, разрешённый
 --   анти-читом В ДВИЖЕНИИ (проверено: 30+ с полёта на 20 ст/с без сбросов).
 --   Выше +10 ст в движении анти-чит сбрасывает машину каждые ~13-15 с.
--- NAV_ALT — высота перемещения nav_car = максимальной безопасной (10 ст).
 -- NAV_SPEED — 20 ст/с: на +10 ст выше скорость накапливает «подозрение»
 --   анти-чита (25 ст/с — срабатывания при длительном полёте; 20 ст/с —
 --   30+ с чисто). Сбросы не смертельны — контроллер восстанавливается.
+-- Высота при nav_car НЕ меняется: машина летит на текущей высоте
+-- (над поверхностью = как при старте, при активной сессии fly_car —
+-- на её высоте), повторяя рельеф по рейкасту.
 Vehicles.ABS_CEILING = 64
 Vehicles.HOVER_STEP = 1
-Vehicles.NAV_ALT = 10
 Vehicles.NAV_SPEED = 20
 Vehicles.MAX_DIST = 2000
 Vehicles.DT = 0.05
@@ -59,7 +60,7 @@ end
 
 function Vehicles:_groundY(s, p)
 	local hit = workspace:Raycast(p + Vector3.new(0, 5, 0), Vector3.new(0, -220, 0), s.rayParams)
-	return hit and hit.Position.Y or (p.Y - (s.studs or self.NAV_ALT))
+	return hit and hit.Position.Y or (p.Y - (s.navStuds or s.studs or 1))
 end
 
 function Vehicles:_teardown()
@@ -89,7 +90,8 @@ function Vehicles:_loop(s)
 			vz = math.clamp((s.holdZ - p.Z) * 3, -12, 12)
 			vy = math.clamp((targetY - p.Y) * 3, -12, 12)
 		elseif s.mode == "nav" then
-			local targetY = math.min(groundY + self.NAV_ALT, self.ABS_CEILING)
+			-- высота НЕ меняем: повторяем рельеф на стартовой высоте
+			local targetY = math.min(groundY + (s.navStuds or self.HOVER_STEP), self.ABS_CEILING)
 			vx = math.clamp((s.navX - p.X) * 3, -self.NAV_SPEED, self.NAV_SPEED)
 			vz = math.clamp((s.navZ - p.Z) * 3, -self.NAV_SPEED, self.NAV_SPEED)
 			vy = math.clamp((targetY - p.Y) * 3, -14, 14)
@@ -248,6 +250,13 @@ function Vehicles:navigate(dx, dz, isCancelled)
 	local _, _, model = self:_car()
 	local s = self:_ensureSession(root, model)
 	local startX, startZ = root.Position.X, root.Position.Z
+	-- высота полёта = текущая (не смещаем Y): при активной сессии fly_car —
+	-- её высота, иначе — текущая высота над поверхностью (мин. 0.5 ст)
+	if s.level then
+		s.navStuds = s.level * self.HOVER_STEP
+	else
+		s.navStuds = math.clamp(root.Position.Y - self:_groundY(s, root.Position), 0.5, 10)
+	end
 	s.mode = "nav"
 	s.navX = startX + dx
 	s.navZ = startZ + dz
@@ -283,14 +292,7 @@ function Vehicles:navigate(dx, dz, isCancelled)
 		s.holdZ = s.root.Position.Z
 		return { success = true, data = { travelled = math.floor(travelled), knocks = knocks, resumed = "hover", height = resumeLevel } }
 	end
-	s.mode = "landing"
-	s.modeSince = nil
-	s.holdX = s.root.Position.X
-	s.holdZ = s.root.Position.Z
-	t0 = tick()
-	while not s.landed and tick() - t0 < 45 and s.root.Parent do
-		task.wait(0.1)
-	end
+	-- высота в nav не менялась — посадка не нужна, просто снимаем констрейнты
 	self:_teardown()
 	return { success = true, data = { landed = true, travelled = math.floor(travelled), knocks = knocks } }
 end
