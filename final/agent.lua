@@ -15,7 +15,8 @@ local BASE_URL = getgenv().SanDiegoAgentBaseUrl or "https://raw.githubuserconten
 
 -- Переживаем телепорты: СРАЗУ (до любых рискованных операций) ставим в
 -- очередь перезапуск этого же загрузчика на новом сервере. Очередной код
--- дожидается полной загрузки игры, повторяет попытки с бэкофом и проверяет,
+-- дожидается полной загрузки игры, повторяет попытки с бэкофом
+-- (2/4/8… с, потолок 300 с, до 12 попыток) и проверяет,
 -- что агент реально стартовал (getgenv().SanDiegoAgentLastStartJobId).
 -- Загрузчик при каждом запуске ставит себя в очередь заново — цикл
 -- самоподдерживающийся и покрывает ЛЮБОЙ телепорт, не только join_private_server.
@@ -36,9 +37,11 @@ do
 		-- грузится): ждём полной загрузки, иначе HttpGet может упасть.
 		"	pcall(function() if not game:IsLoaded() then game.Loaded:Wait() end end)",
 		"	task.wait(1)",
-		"	for i = 1, 5 do",
+		"	for i = 1, 12 do",
 		"		if reloadAttempt(i) then return end",
-		"		task.wait(math.min(2 ^ i, 10))",
+		"		local backoff = math.min(2 ^ i, 300)",
+		"		print(\"[SanDiegoAgent][QueueOnTeleport] waiting \" .. backoff .. \"s before retry\")",
+		"		task.wait(backoff)",
 		"	end",
 		"	warn(\"[SanDiegoAgent][QueueOnTeleport] all reload attempts failed; agent NOT running after teleport\")",
 		"end)",
