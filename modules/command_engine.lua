@@ -326,39 +326,6 @@ function CommandEngine:getCommandsSpec()
 			},
 		},
 		{
-			name = "place_printer",
-			description = "Установить один Money Printer в своей комнате: принтер экипируется в руку и активируется кликом, сервер ставит модель на 4 ст перед персонажем. Без параметров — перед текущим взглядом; с x и z — в указанной точке (персонаж сам встанет на нужную позицию). Требует находиться внутри своей комнаты",
-			params = {
-				x = {
-					type = "integer",
-					required = false,
-					min = -7000,
-					max = 7000,
-					description = "Целевая координата X (опционально, вместе с z)",
-				},
-				z = {
-					type = "integer",
-					required = false,
-					min = -7000,
-					max = 7000,
-					description = "Целевая координата Z (опционально, вместе с x)",
-				},
-			},
-		},
-		{
-			name = "place_all_printers",
-			description = "Автоматически расставить Money Printer сеткой в текущей комнате: комната определяется автоматически (Region юнита), границы — рейкастами от центра, начало — от левого угла стены, на которую смотрит персонаж, колонки идут вправо вдоль стены, ряды — вглубь; ячейки не выходят за границы комнаты, допускается частичное наложение принтеров. Уже стоящие принтеры не трогает. Требует стоять в своей комнате лицом к стене-старту",
-			params = {
-				max_total = {
-					type = "integer",
-					required = false,
-					min = 1,
-					max = 50,
-					description = "Сколько принтеров разместить из рюкзака (по умолчанию 50, реальный лимит игры — 50 в квартире)",
-				},
-			},
-		},
-		{
 			name = "get_inventory",
 			description = "Вернуть инвентарь персонажа: содержимое рюкзака (по именам с количеством), предмет в руке и сводку по принтерам (в рюкзаке, в руке, суммарно, с уникальными id экземпляров)",
 			params = {},
@@ -1507,69 +1474,6 @@ function CommandEngine:_buyPrinterCommand(payload)
 	return { success = true, data = res }
 end
 
-function CommandEngine:_placePrinterCommand(payload)
-	if not self.printers then
-		return { success = false, error = "printers module unavailable" }
-	end
-	payload = payload or {}
-	local room, roomErr
-	local ok, res = pcall(function()
-		if typeof(payload.x) == "number" and typeof(payload.z) == "number" then
-			-- ставим один принтер в точке (x, z): встаём на 4 ст короче по линии
-			-- взгляда (сервер ставит модель на charPos + look * 4).
-			room, roomErr = self.printers:detectRoom()
-			if not room then
-				return { success = false, error = roomErr }
-			end
-			local hrp = self:_getHrp()
-			if not hrp then
-				return { success = false, error = "HumanoidRootPart not found" }
-			end
-			local dx, dz = payload.x - hrp.Position.X, payload.z - hrp.Position.Z
-			local len = math.sqrt(dx * dx + dz * dz)
-			if len < 0.01 then
-				return { success = false, error = "target too close to character" }
-			end
-			local fwd = Vector3.new(dx / len, 0, dz / len)
-			self.printers:_positionCharacter(payload.x - fwd.X * self.printers.PLACE_FORWARD, payload.z - fwd.Z * self.printers.PLACE_FORWARD, fwd)
-		else
-			room, roomErr = self.printers:detectRoom()
-			if not room then
-				return { success = false, error = roomErr }
-			end
-		end
-		return self.printers:placeOne(room, function()
-			return self:_isCancelled()
-		end)
-	end)
-	if not ok then
-		return { success = false, error = tostring(res) }
-	end
-	if not res.success then
-		return { success = false, error = res.error }
-	end
-	return { success = true, data = res }
-end
-
-function CommandEngine:_placeAllPrintersCommand(payload)
-	if not self.printers then
-		return { success = false, error = "printers module unavailable" }
-	end
-	payload = payload or {}
-	local ok, res = pcall(function()
-		return self.printers:placeGrid(payload.max_total, function()
-			return self:_isCancelled()
-		end)
-	end)
-	if not ok then
-		return { success = false, error = tostring(res) }
-	end
-	if not res.success then
-		return { success = false, error = res.error, data = { placed = res.placed, failed = res.failed } }
-	end
-	return { success = true, data = res }
-end
-
 function CommandEngine:_pickupPrinterCommand(payload)
 	if not self.printers then
 		return { success = false, error = "printers module unavailable" }
@@ -2681,10 +2585,6 @@ function CommandEngine:execute(command)
 		result = self:_transferMoneyViaRespawn(payload)
 	elseif name == "respawn_for_money" then
 		result = self:_respawnForMoney(payload)
-	elseif name == "place_printer" then
-		result = self:_placePrinterCommand(payload)
-	elseif name == "place_all_printers" then
-		result = self:_placeAllPrintersCommand(payload)
 	elseif name == "get_inventory" then
 		result = self:_getInventoryCommand()
 	elseif name == "buy_printer" then
