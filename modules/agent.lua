@@ -92,7 +92,11 @@ function Agent:_sendStatus(force)
 	-- statusInterval. Реальные значения таймеров уходят в data при отправке.
 	local snapshot = {}
 	for k, v in pairs(data) do
-		snapshot[k] = v
+		-- update_reason/update_fields исключаем: они служебные и не должны
+		-- участвовать в сравнении (иначе каждая отправка меняет снапшот).
+		if k ~= "update_reason" and k ~= "update_fields" then
+			snapshot[k] = v
+		end
 	end
 	if typeof(snapshot.custom_data) == "table" then
 		local cd = {}
