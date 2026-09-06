@@ -394,6 +394,11 @@ function CommandEngine:getCommandsSpec()
 			params = {},
 		},
 		{
+			name = "deploy_printers",
+			description = "Проверить инвентарь и расстановку принтеров: если у персонажа есть Money Printer в рюкзаке/руке и разложено менее 50 — подобрать все разложенные и разложить заново сеткой по комнате (ряды прижаты к стене напротив двери, шаг 1.4, валидация мебели). Затем встать ровно по центру комнаты спиной к стене с дверью. Если принтеров в инвентаре нет — только встать по центру спиной к двери. Требует стоять в целевой комнате своего апартамента",
+			params = {},
+		},
+		{
 			name = "buy_printer",
 			description = "Купить N Money Printer у витрины. Требует стоять у витрины (prompt в зоне досягаемости). Покупка выполняется прямым вводом в ProximityPrompt (без эмуляции клавиш), каждая покупка верифицируется по фактическому приросту числа принтеров; при нехватке денег команда останавливается и возвращает сколько куплено",
 			params = {
@@ -1609,6 +1614,60 @@ function CommandEngine:_pickupAllPrintersCommand()
 	return { success = true, data = res }
 end
 
+function CommandEngine:_deployPrintersCommand()
+	if not self.printers then
+		return { success = false, error = "printers module unavailable" }
+	end
+	local ok, res = pcall(function()
+		local room, err = self.printers:detectRoom()
+		if not room then
+			return { success = false, error = err }
+		end
+		local isCancelled = function()
+			return self:_isCancelled()
+		end
+		local out = {
+			inventory = self.printers:getInventory().printers_total,
+			placed_before = self.printers:countPlaced(room),
+			redeployed = false,
+		}
+		if out.inventory > 0 and out.placed_before < self.printers.MAX_BUY then
+			if out.placed_before > 0 then
+				local pu = self.printers:pickupAllPrinters(isCancelled)
+				if not pu.success then
+					return { success = false, error = "pickup failed: " .. tostring(pu.error), data = out }
+				end
+				out.picked = pu.picked
+			end
+			local pg = self.printers:placeRoomGrid(self.printers.MAX_BUY, isCancelled)
+			if not pg.success then
+				return { success = false, error = "place failed: " .. tostring(pg.error), data = out }
+			end
+			out.redeployed = true
+			out.placed = pg.placed
+			out.failed = pg.failed
+			out.cells = pg.cells
+			out.start_side = pg.start_side
+			out.room_total = pg.room_total
+		end
+		local st = self.printers:standCenterBackToDoor()
+		if not st.success then
+			return { success = false, error = "stand failed: " .. tostring(st.error), data = out }
+		end
+		out.position = { x = math.round(st.x * 100) / 100, z = math.round(st.z * 100) / 100 }
+		out.facing = st.facing
+		out.door_side = st.door_side
+		return { success = true, data = out }
+	end)
+	if not ok then
+		return { success = false, error = tostring(res) }
+	end
+	if not res.success then
+		return { success = false, error = res.error, data = res.data }
+	end
+	return { success = true, data = res.data }
+end
+
 function CommandEngine:_jumpCommand()
 	local humanoid = self:_getHumanoid()
 	if not humanoid then
@@ -2631,6 +2690,8 @@ function CommandEngine:execute(command)
 		result = self:_pickupPrinterCommand(payload)
 	elseif name == "pickup_all_printers" then
 		result = self:_pickupAllPrintersCommand()
+	elseif name == "deploy_printers" then
+		result = self:_deployPrintersCommand()
 	elseif name == "jump" then
 		result = self:_jumpCommand()
 	elseif name == "hold_key" then

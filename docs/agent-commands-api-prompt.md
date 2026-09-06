@@ -202,6 +202,10 @@ POST /commands/{id}/status
       "params": {}
     },
     {
+      "name": "deploy_printers",
+      "params": {}
+    },
+    {
       "name": "jump",
       "params": {}
     },
