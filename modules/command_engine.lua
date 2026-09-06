@@ -394,7 +394,7 @@ function CommandEngine:getCommandsSpec()
 		},
 		{
 			name = "nav_car",
-			description = "Перемещение летающей машины на смещение по осям: x и z — расстояние в стадах со знаком направления (±2000). Скорость фиксированная 25 ст/с, высота полёта +10 над поверхностью (максимум, разрешённый анти-читом в движении). Если активна сессия fly_car — после прибытия вернётся в зависание на прежней высоте, иначе быстро сядет. Требует сидеть в машине",
+			description = "Перемещение летающей машины на смещение по осям: x и z — расстояние в стадах со знаком направления (±2000). Скорость фиксированная 20 ст/с (выше на +10 ст анти-чит срабатывает), высота полёта +10 над поверхностью (максимум безопасной). Прерывается командой cancel: движение остановится, при активной сессии fly_car машина останется висеть, иначе упадёт и сессия завершится. Требует сидеть в машине",
 			params = {
 				x = {
 					type = "integer",
@@ -1632,8 +1632,11 @@ function CommandEngine:_flyCarCommand(payload)
 		return { success = false, error = "height must be an integer 0..10" }
 	end
 	local ok, res = pcall(function()
+		local isCancelled = function()
+			return self:_isCancelled()
+		end
 		if height == 0 then
-			return self.vehicles:land()
+			return self.vehicles:land(isCancelled)
 		end
 		return self.vehicles:hover(height)
 	end)
@@ -1659,7 +1662,9 @@ function CommandEngine:_navCarCommand(payload)
 		return { success = false, error = "z must be an integer in [-2000, 2000]" }
 	end
 	local ok, res = pcall(function()
-		return self.vehicles:navigate(x, z)
+		return self.vehicles:navigate(x, z, function()
+			return self:_isCancelled()
+		end)
 	end)
 	if not ok then
 		return { success = false, error = tostring(res) }

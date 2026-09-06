@@ -11,11 +11,13 @@ Vehicles.__index = Vehicles
 --   анти-читом В ДВИЖЕНИИ (проверено: 30+ с полёта на 20 ст/с без сбросов).
 --   Выше +10 ст в движении анти-чит сбрасывает машину каждые ~13-15 с.
 -- NAV_ALT — высота перемещения nav_car = максимальной безопасной (10 ст).
--- NAV_SPEED — 25 ст/с: фиксированная допустимая скорость перемещения.
+-- NAV_SPEED — 20 ст/с: на +10 ст выше скорость накапливает «подозрение»
+--   анти-чита (25 ст/с — срабатывания при длительном полёте; 20 ст/с —
+--   30+ с чисто). Сбросы не смертельны — контроллер восстанавливается.
 Vehicles.ABS_CEILING = 64
 Vehicles.HOVER_STEP = 1
 Vehicles.NAV_ALT = 10
-Vehicles.NAV_SPEED = 25
+Vehicles.NAV_SPEED = 20
 Vehicles.MAX_DIST = 2000
 Vehicles.DT = 0.05
 
@@ -198,8 +200,10 @@ function Vehicles:hover(level)
 	return { success = true, data = { height = level, studs = s.studs, mode = "hover" } }
 end
 
--- Посадка и завершение сессии. Ждёт касания до 45 с.
-function Vehicles:land()
+-- Посадка и завершение сессии. Ждёт касания до 45 с; isCancelled —
+-- кооперативное прерывание (команда cancel): мгновенный сброс констрейнтов
+-- (высота ≤ +10 ст — падение безопасно).
+function Vehicles:land(isCancelled)
 	local s = self.session
 	if not s then
 		return { success = true, data = { landed = true, note = "no active fly session" } }
@@ -212,6 +216,10 @@ function Vehicles:land()
 	local level = s.level
 	local t0 = tick()
 	while not s.landed and tick() - t0 < 45 and s.root.Parent do
+		if isCancelled and isCancelled() then
+			self:_teardown()
+			return { success = false, error = "cancelled", data = { landed = false, knocks = knocks, height = level } }
+		end
 		task.wait(0.1)
 	end
 	self:_teardown()
@@ -219,9 +227,12 @@ function Vehicles:land()
 end
 
 -- Перемещение на смещение (dx, dz) в стадах по безопасному профилю
--- (+6 над поверхностью, 25 ст/с). Если сессия fly_car была активна —
+-- (+10 над поверхностью, 20 ст/с). Если сессия fly_car была активна —
 -- после прибытия вернётся в зависание на прежней высоте, иначе сядет.
-function Vehicles:navigate(dx, dz)
+-- isCancelled — кооперативное прерывание: отменяем движение, при активной
+-- сессии fly_car остаёмся висеть на месте, иначе мгновенно сбрасываем
+-- констрейнты (падение с ≤10 ст безопасно).
+function Vehicles:navigate(dx, dz, isCancelled)
 	dx = tonumber(dx) or 0
 	dz = tonumber(dz) or 0
 	if dx == 0 and dz == 0 then
@@ -246,6 +257,18 @@ function Vehicles:navigate(dx, dz)
 	local timeout = math.min(dist / self.NAV_SPEED + 90, 280)
 	local t0 = tick()
 	while not s.navArrived and tick() - t0 < timeout and s.root.Parent do
+		if isCancelled and isCancelled() then
+			local kn = s.knocks
+			if resumeLevel then
+				s.mode = "hover"
+				s.studs = resumeLevel * self.HOVER_STEP
+				s.holdX = s.root.Position.X
+				s.holdZ = s.root.Position.Z
+				return { success = false, error = "cancelled", data = { knocks = kn, resumed = "hover", height = resumeLevel } }
+			end
+			self:_teardown()
+			return { success = false, error = "cancelled", data = { landed = false, knocks = kn } }
+		end
 		task.wait(0.1)
 	end
 	local travelled = math.sqrt((s.root.Position.X - startX) ^ 2 + (s.root.Position.Z - startZ) ^ 2)
