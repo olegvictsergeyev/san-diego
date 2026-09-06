@@ -45,7 +45,7 @@
 
 1. Если backend меняет формат запроса/ответа, сначала согласовать изменения с backend-разработчиком.
 2. Обновить `modules/http_client.lua`, `modules/agent.lua`, `modules/result_store.lua` и `docs/agent-commands-api-prompt.md`.
-3. Long polling `/commands/next` использует query-параметры `nickname`, `long_poll=true`, `timeout=30`.
+3. Long polling `/commands/next` использует query-параметры `nickname`, `long_poll=true`, `timeout=45`. Потолок таймаута ~50 с: nginx перед бэкендом разрывает соединения на 60 с с ответом 504 (проверено тестами).
 4. Результат команды отправляется через `POST /commands/{id}/result` с полями `result` (строка) и `status`.
 5. Агент хранит неотправленные результаты в `modules/result_store.lua` и повторяет отправку в фоновом цикле.
 6. Проверить обратную совместимость.
