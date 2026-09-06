@@ -216,8 +216,8 @@ function Agent:_getCommandTimeout(command)
 	if command.name == "transfer_money_via_respawn" then
 		local maxAttempts = tonumber(payload.max_attempts) or 100
 		local waitSeconds = tonumber(payload.wait_seconds) or 5
-		-- Каждая итерация: преследование (~10с) + ожидание respawn (~15с) + wait_seconds.
-		return math.clamp(maxAttempts * (waitSeconds + 25) + 60, 60, 36000)
+		-- Каждая итерация: погоня (до ~25с) + ожидание respawn (~15с) + wait_seconds.
+		return math.clamp(maxAttempts * (waitSeconds + 45) + 60, 60, 36000)
 	end
 	return 300
 end

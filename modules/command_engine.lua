@@ -673,20 +673,21 @@ function CommandEngine:_moveAxis(axis, payload)
 	local sign = value >= 0 and 1 or -1
 	local _, startYaw = hrp.CFrame:ToEulerAnglesYXZ()
 
-	-- Базовые шаги: номинальная скорость ~60 студий/с — человечески
-	-- правдоподобная, чтобы не триггерить античит San Diego
-	-- (за 120–180 ст/с игровой AC сбрасывает данные аккаунта — проверено на тесте).
-	-- X/Z: 6 студий за шаг, пауза 0.1 с. Y: 15 студий за шаг, пауза 0.25 с.
+	-- Базовые шаги: номинальная скорость ~12 студий/с.
+	-- ЛИМИТ АНТИЧИТА SAN DIEGO (AntiTp) — ~16 студий/с (walk speed):
+	-- эмпирически проверено Potassium-тестами: 13.3 ст/с × 30с — чисто,
+	-- 180 ст/с — rollback позиции, повторные gross-нарушения — сброс данных аккаунта.
+	-- X/Z: 3 студии за шаг, пауза 0.25 с. Y: 3 студии за шаг, пауза 0.25 с.
 	-- speed 1..10 масштабирует только длину шага, поэтому min в 10 раз медленнее.
-	-- ВАЖНО: никогда не анкорить персонажа во время движения — перемещение
-	-- без физики мгновенно флагается античитом.
+	-- ВАЖНО: никогда не анкорить персонажа во время движения и не делать
+	-- одиночных прыжков > 16 студий — фиксируется античитом.
 	local baseStep, baseWait
 	if axis == "y" then
-		baseStep = 15
+		baseStep = 3
 		baseWait = 0.25
 	else
-		baseStep = 6
-		baseWait = 0.1
+		baseStep = 3
+		baseWait = 0.25
 	end
 
 	local stepSize = baseStep * sign * (speed / 10)
@@ -829,10 +830,10 @@ function CommandEngine:_moveTo(payload)
 		}
 	end
 
-	-- Те же параметры, что и в _moveAxis: 6 студий за шаг, пауза 0.1 с.
-	-- Номинальная скорость ~60 студий/с — безопасно для античита (см. _moveAxis).
-	local baseStep = 6
-	local baseWait = 0.1
+	-- Те же параметры, что и в _moveAxis: 3 студии за шаг, пауза 0.25 с.
+	-- Номинальная скорость ~12 студий/с — лимит античита ~16 ст/с (см. _moveAxis).
+	local baseStep = 3
+	local baseWait = 0.25
 	local stepSize = baseStep * (speed / 10)
 	local waitTime = baseWait
 	local steps = math.max(1, math.floor(dist / stepSize))
@@ -1130,8 +1131,9 @@ function CommandEngine:_transferMoneyViaRespawn(payload)
 		end
 
 		-- Перед смертью подбегаем к цели. Если не достигли — НЕ убиваем, итерация не считается за respawn.
+		-- Таймаут 25с: скорость движения ограничена античитом ~12 ст/с (см. _moveAxis).
 		local chaseResult = self:_chasePlayer(targetPlayer, {
-			timeout = 10,
+			timeout = 25,
 			threshold = 1,
 			heightThreshold = 1,
 			dieOnReach = true,
@@ -1303,8 +1305,9 @@ function CommandEngine:_respawnForMoney(payload)
 	end
 
 	-- Подбегаем к цели и умираем только если достигли.
+	-- Таймаут 25с: скорость движения ограничена античитом ~12 ст/с (см. _moveAxis).
 	local chaseResult = self:_chasePlayer(targetPlayer, {
-		timeout = 10,
+		timeout = 25,
 		threshold = 1,
 		heightThreshold = 1,
 		dieOnReach = true,
