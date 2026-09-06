@@ -16,24 +16,6 @@ function PrivateServer:setCommandEngine(commandEngine)
 	self.commandEngine = commandEngine
 end
 
-function PrivateServer:_queueReload()
-    local baseUrl = tostring(self.loaderUrl):match("(.+)/final/agent%.lua$") or self.loaderUrl
-    local code = 'local baseUrl = "' .. baseUrl .. '"\ngetgenv().SanDiegoAgentBaseUrl = baseUrl\ntask.wait(0.5)\nprint("[SanDiegoAgent][QueueOnTeleport] reloading loader after teleport")\nlocal ok, err = pcall(function()\n    loadstring(game:HttpGet(baseUrl .. "/final/agent.lua?nocache=" .. tostring(tick())))()\nend)\nif not ok then\n    warn("[SanDiegoAgent][QueueOnTeleport] reload failed: " .. tostring(err))\nend'
-    if self.compat and self.compat.queueOnTeleport then
-        local ok = self.compat.queueOnTeleport(code)
-        print("[SanDiegoAgent][QueueOnTeleport] compat queue_on_teleport:", tostring(ok))
-        return ok
-    end
-    local q = queue_on_teleport
-    if typeof(q) ~= "function" then
-        warn("[SanDiegoAgent][QueueOnTeleport] queue_on_teleport is not available")
-        return false
-    end
-    local ok = pcall(q, code)
-    print("[SanDiegoAgent][QueueOnTeleport] queue_on_teleport result:", tostring(ok))
-    return ok
-end
-
 function PrivateServer:_getRemotesFolder()
     local remotes = ReplicatedStorage:FindFirstChild("__remotes")
     if not remotes then
@@ -96,17 +78,14 @@ function PrivateServer:joinByCode(code)
     end
 
     -- Запускаем в отдельном потоке, потому что успешный телепорт
-    -- может прервать выполнение текущего скрипта.
+    -- может прервать выполнение текущего скрипта. Перезапуск агента на
+    -- новом сервере обеспечивает сам загрузчик (self-arm queue_on_teleport).
     task.spawn(function()
         -- Отключаем захват камеры перед телепортом, чтобы избежать вылетов.
         if self.commandEngine and typeof(self.commandEngine.releaseCamera) == "function" then
             pcall(function()
                 self.commandEngine:releaseCamera()
             end)
-        end
-        local queued = self:_queueReload()
-        if not queued then
-            warn("[SanDiegoAgent][PrivateServer] failed to queue reload; agent may not restart after teleport")
         end
         local joinOk, joinResult = pcall(function()
             return joinRemote:InvokeServer(code)
