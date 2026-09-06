@@ -719,7 +719,7 @@ function Printers:pickupPrinters(opts, isCancelled)
 		success = picked > 0,
 		picked = picked,
 		failed = failed,
-		inventory = self:countInventory(),
+		inventory = self:getInventory().printers_total,
 		room_total = self:countPlaced(room),
 	}
 end
