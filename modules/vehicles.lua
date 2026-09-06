@@ -178,7 +178,7 @@ function Vehicles:_ensureSession(root, model)
 		att = att,
 		mode = "hover",
 		level = nil,
-		studs = self.NAV_ALT,
+		studs = self.HOVER_STEP,
 		holdX = root.Position.X,
 		holdZ = root.Position.Z,
 		navX = root.Position.X,
