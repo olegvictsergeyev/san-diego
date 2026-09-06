@@ -674,16 +674,19 @@ function CommandEngine:_moveAxis(axis, payload)
 	local _, startYaw = hrp.CFrame:ToEulerAnglesYXZ()
 
 	-- Базовые шаги подобраны для плавности (max speed = прежняя скорость):
-	-- X/Z: 4 студии за шаг, пауза 0.02 с.
-	-- Y: 20 студий за шаг, пауза 0.1 с.
+	-- X/Z: 12 студий за шаг, пауза 0.06 с.
+	-- Y: 60 студий за шаг, пауза 0.3 с.
 	-- speed 1..10 масштабирует только длину шага, поэтому min в 10 раз медленнее.
+	-- ВАЖНО: шаг/пауза держат номинальную скорость ~200 студий/с, но число
+	-- физических операций и репликаций в 3 раза меньше, чем при 4/0.02 —
+	-- это критично для слабых устройств (телефоны с 4+ инстансами).
 	local baseStep, baseWait
 	if axis == "y" then
-		baseStep = 20
-		baseWait = 0.1
+		baseStep = 60
+		baseWait = 0.3
 	else
-		baseStep = 4
-		baseWait = 0.02
+		baseStep = 12
+		baseWait = 0.06
 	end
 
 	local stepSize = baseStep * sign * (speed / 10)
@@ -826,8 +829,10 @@ function CommandEngine:_moveTo(payload)
 		}
 	end
 
-	local baseStep = 4
-	local baseWait = 0.02
+	-- Те же параметры, что и в _moveAxis: 12 студий за шаг, пауза 0.06 с.
+	-- Скорость ~200 студий/с, но в 3 раза меньше физических операций (см. _moveAxis).
+	local baseStep = 12
+	local baseWait = 0.06
 	local stepSize = baseStep * (speed / 10)
 	local waitTime = baseWait
 	local steps = math.max(1, math.floor(dist / stepSize))
