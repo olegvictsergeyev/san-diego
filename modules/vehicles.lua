@@ -27,8 +27,8 @@ Vehicles.DEFAULT_LANE_Z = 150.07
 Vehicles.MAX_DRIVE_DIST = 20000
 -- Анти-чит: при реальной скорости ~613+ ст/с сервер качнул технику,
 -- обнулил скорость и откатил на точку нарушения (rewind).
--- Кап: тестовое значение 335 (обычно предел −10% = 551).
-Vehicles.DRIVE_VMAX = 335
+-- Кап = 551 −10% = 496: рабочее значение.
+Vehicles.DRIVE_VMAX = 496
 
 function Vehicles.new()
 	local self = setmetatable({}, Vehicles)
