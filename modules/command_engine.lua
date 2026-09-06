@@ -389,6 +389,11 @@ function CommandEngine:getCommandsSpec()
 			},
 		},
 		{
+			name = "pickup_all_printers",
+			description = "Подобрать ВСЕ расставленные Money Printer апартамента (все комнаты) обратно в инвентарь. Надёжно: перед каждым подбором персонаж подводится к промпту и ждётся репликация позиции на сервер, неуспешные подборы повторяются до 3 раз — срабатывает даже если персонаж стоит на принтере. Требует стоять внутри своего апартамента",
+			params = {},
+		},
+		{
 			name = "buy_printer",
 			description = "Купить N Money Printer у витрины. Требует стоять у витрины (prompt в зоне досягаемости). Покупка выполняется прямым вводом в ProximityPrompt (без эмуляции клавиш), каждая покупка верифицируется по фактическому приросту числа принтеров; при нехватке денег команда останавливается и возвращает сколько куплено",
 			params = {
@@ -1586,6 +1591,24 @@ function CommandEngine:_pickupPrinterCommand(payload)
 	return { success = true, data = res }
 end
 
+function CommandEngine:_pickupAllPrintersCommand()
+	if not self.printers then
+		return { success = false, error = "printers module unavailable" }
+	end
+	local ok, res = pcall(function()
+		return self.printers:pickupAllPrinters(function()
+			return self:_isCancelled()
+		end)
+	end)
+	if not ok then
+		return { success = false, error = tostring(res) }
+	end
+	if not res.success then
+		return { success = false, error = res.error, data = { picked = res.picked, failed = res.failed } }
+	end
+	return { success = true, data = res }
+end
+
 function CommandEngine:_jumpCommand()
 	local humanoid = self:_getHumanoid()
 	if not humanoid then
@@ -2606,6 +2629,8 @@ function CommandEngine:execute(command)
 		result = self:_buyPrinterCommand(payload)
 	elseif name == "pickup_printer" then
 		result = self:_pickupPrinterCommand(payload)
+	elseif name == "pickup_all_printers" then
+		result = self:_pickupAllPrintersCommand()
 	elseif name == "jump" then
 		result = self:_jumpCommand()
 	elseif name == "hold_key" then

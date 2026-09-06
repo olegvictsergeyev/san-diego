@@ -610,7 +610,11 @@ end
 
 -- Подбирает один принтер (модель из папки MoneyPrinters комнаты).
 -- Подводит персонажа к точке промпта, вызывает RemoteFunction с моделью,
--- ждёт исчезновения модели из папки.
+-- ждёт исчезновения модели из папки. Надёжность (проверено на живом
+-- сервере): после микротелепорта ждём 0.7 с — сервер должен увидеть
+-- новую позицию персонажа, иначе InvokeServer вернёт false (старая
+-- позиция слишком далеко от промпта, персонаж «стоит на принтере»).
+-- Неуспех → до 3 попыток с повторным подводом.
 function Printers:_pickupOne(model, isCancelled)
 	if not (model and model.Parent) then
 		return { success = false, error = "model is gone" }
@@ -619,36 +623,96 @@ function Printers:_pickupOne(model, isCancelled)
 	if not remote then
 		return { success = false, error = "pickup remote not found" }
 	end
-	-- встаём рядом с точкой промпта (2.5 ст по горизонтали — дистанция
-	-- промпта 8 ст, дальше античит на микротелепортах не сработает)
 	local prompt = model:FindFirstChild("MoneyPrinterPickupPrompt", true)
 	local wp = prompt and prompt.Parent and prompt.Parent.WorldPosition
-	if wp then
-		local cf = model:GetBoundingBox()
-		local flat = Vector3.new(wp.X - cf.Position.X, 0, wp.Z - cf.Position.Z)
-		if flat.Magnitude < 0.01 then
-			flat = Vector3.new(1, 0, 0)
-		end
-		local charPos = Vector3.new(wp.X, 0, wp.Z) - flat.Unit * 2.5
-		self:_positionCharacter(charPos.X, charPos.Z, flat.Unit)
-	end
-	local ok, res = pcall(function()
-		return remote:InvokeServer(model)
-	end)
-	if not ok then
-		return { success = false, error = "pickup invoke failed: " .. tostring(res) }
-	end
-	local t0 = tick()
-	while tick() - t0 < self.PICKUP_CONFIRM_TIMEOUT do
-		if isCancelled and isCancelled() then
-			return { success = false, error = "cancelled" }
-		end
-		task.wait(0.1)
+	local lastErr = "unknown"
+	for attempt = 1, 3 do
 		if not model.Parent then
 			return { success = true }
 		end
+		if isCancelled and isCancelled() then
+			return { success = false, error = "cancelled" }
+		end
+		-- встаём рядом с точкой промпта (2.5 ст по горизонтали —
+		-- дистанция промпта 8 ст)
+		if wp then
+			local cf = model:GetBoundingBox()
+			local flat = Vector3.new(wp.X - cf.Position.X, 0, wp.Z - cf.Position.Z)
+			if flat.Magnitude < 0.01 then
+				flat = Vector3.new(1, 0, 0)
+			end
+			self:_positionCharacter(wp.X - flat.Unit.X * 2.5, wp.Z - flat.Unit.Z * 2.5, flat.Unit)
+			task.wait(0.7) -- репликация позиции на сервер
+		end
+		local ok, res = pcall(function()
+			return remote:InvokeServer(model)
+		end)
+		if not ok then
+			lastErr = "pickup invoke failed: " .. tostring(res)
+		else
+			lastErr = "pickup not confirmed (res=" .. tostring(res) .. ")"
+			local t0 = tick()
+			while tick() - t0 < self.PICKUP_CONFIRM_TIMEOUT do
+				if isCancelled and isCancelled() then
+					return { success = false, error = "cancelled" }
+				end
+				task.wait(0.1)
+				if not model.Parent then
+					return { success = true }
+				end
+			end
+		end
+		task.wait(0.5)
 	end
-	return { success = false, error = "pickup not confirmed (res=" .. tostring(res) .. ")" }
+	return { success = false, error = lastErr }
+end
+
+-- Подбирает ВСЕ расставленные принтеры апартамента (все комнаты).
+-- Каждый подбор — через _pickupOne (подвод + 0.7 с + ретрай), поэтому
+-- срабатывает даже если персонаж стоит на принтере.
+function Printers:pickupAllPrinters(isCancelled)
+	local room, err = self:detectRoom()
+	if not room then
+		return { success = false, error = err }
+	end
+	if not room.folder then
+		return { success = false, error = "MoneyPrinters folder not found in room" }
+	end
+	local player = self:_player()
+	if room.ownerUserId and room.ownerUserId ~= player.UserId then
+		return { success = false, error = "room is owned by another player (ApartmentOwnerUserId=" .. tostring(room.ownerUserId) .. ")" }
+	end
+	local targets = {}
+	for _, c in ipairs(room.folder:GetChildren()) do
+		if c:GetAttribute("MoneyPrinterId") then
+			table.insert(targets, c)
+		end
+	end
+	if #targets == 0 then
+		return { success = false, error = "no placed printers found" }
+	end
+	local picked, failed = 0, 0
+	for _, model in ipairs(targets) do
+		if isCancelled and isCancelled() then
+			return { success = false, error = "cancelled", picked = picked, failed = failed + (#targets - picked - failed) }
+		end
+		local res = self:_pickupOne(model, isCancelled)
+		if res.success then
+			picked = picked + 1
+		else
+			failed = failed + 1
+			if res.error == "cancelled" then
+				return { success = false, error = "cancelled", picked = picked, failed = failed }
+			end
+		end
+	end
+	return {
+		success = picked > 0,
+		picked = picked,
+		failed = failed,
+		inventory = self:getInventory().printers_total,
+		room_total = self:countPlaced(room),
+	}
 end
 
 -- Подбирает принтеры комнаты. Фильтры:

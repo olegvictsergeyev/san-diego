@@ -198,6 +198,10 @@ POST /commands/{id}/status
       }
     },
     {
+      "name": "pickup_all_printers",
+      "params": {}
+    },
+    {
       "name": "jump",
       "params": {}
     },
