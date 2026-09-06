@@ -406,7 +406,7 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 		local gy = self:_groundY(s, p)
 		-- препятствия впереди (низким и средним лучом)
 		if phase ~= "brake" then
-			local ahead = Vector3.new(-24 * dir, 0, 0)
+			local ahead = Vector3.new(24 * dir, 0, 0)
 			local b1 = workspace:Raycast(p + Vector3.new(0, 0.3, 0), ahead, s.rayParams)
 			local b2 = workspace:Raycast(p + Vector3.new(0, 1.6, 0), ahead, s.rayParams)
 			if b1 or b2 then
@@ -417,8 +417,8 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 				local shifted = false
 				for _, dz in ipairs({14, -14, 28, -28, 42, -42}) do
 					local tp = Vector3.new(p.X, p.Y, laneZ + dz)
-					local h1 = workspace:Raycast(tp + Vector3.new(0, 0.3, 0), Vector3.new(-30 * dir, 0, 0), s.rayParams)
-					local h2 = workspace:Raycast(tp + Vector3.new(0, 1.6, 0), Vector3.new(-30 * dir, 0, 0), s.rayParams)
+				local h1 = workspace:Raycast(tp + Vector3.new(0, 0.3, 0), Vector3.new(30 * dir, 0, 0), s.rayParams)
+				local h2 = workspace:Raycast(tp + Vector3.new(0, 1.6, 0), Vector3.new(30 * dir, 0, 0), s.rayParams)
 					if not h1 and not h2 then
 						laneZ = laneZ + dz
 						shifted = true
@@ -448,7 +448,7 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 		if vy < 0 and p.Y < gy + s.studs + 0.3 then vy = math.max(vy, -2) end
 		local vz = math.clamp((laneZ - p.Z) * 3, -40, 40)
 		pcall(function()
-			s.bv.Velocity = Vector3.new(-dir * v, vy, vz)
+			s.bv.Velocity = Vector3.new(dir * v, vy, vz)
 		end)
 		local speed = s.root.AssemblyLinearVelocity.Magnitude
 		-- сброс анти-чита/срыв сцепления: скорость рухнула при высокой команде
