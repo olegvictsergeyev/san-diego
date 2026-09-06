@@ -132,12 +132,26 @@ function Vehicles:_loop(s)
 	pcall(function() s.bv.Velocity = Vector3.zero end)
 end
 
+-- Снимает «чужие» констрейнты агента с детали: после перезагрузки агента
+-- (update_agent/телепорт) сессия предыдущего инстанса остаётся висеть
+-- на машине и конфликтует с новой (два BodyVelocity душат друг друга).
+function Vehicles:_cleanupStray(root)
+	for _, d in ipairs(root:GetChildren()) do
+		if d.Name == "SDFlyBV" or d.Name == "SDFlyAO" or d.Name == "SDFlyAtt" then
+			pcall(function()
+				d:Destroy()
+			end)
+		end
+	end
+end
+
 function Vehicles:_ensureSession(root, model)
 	local s = self.session
 	if s and s.root == root and s.root.Parent and s.bv and s.bv.Parent then
 		return s
 	end
 	self:_teardown()
+	self:_cleanupStray(root)
 	local bv = Instance.new("BodyVelocity")
 	bv.Name = "SDFlyBV"
 	bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
@@ -263,7 +277,8 @@ function Vehicles:navigate(dx, dz, isCancelled)
 	s.navArrived = false
 	local resumeLevel = s.level
 	local dist = math.sqrt(dx * dx + dz * dz)
-	local timeout = math.min(dist / self.NAV_SPEED + 90, 280)
+	-- запас на восстановления после сбросов анти-чита (~4 с каждое)
+	local timeout = math.min(dist / self.NAV_SPEED + 40, 150)
 	local t0 = tick()
 	while not s.navArrived and tick() - t0 < timeout and s.root.Parent do
 		if isCancelled and isCancelled() then
