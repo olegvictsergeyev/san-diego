@@ -413,11 +413,6 @@ function CommandEngine:getCommandsSpec()
 			},
 		},
 		{
-			name = "car_state",
-			description = "Диагностика положения машины: на поверхности или закопана. Возвращает state (on_ground | buried | airborne | unknown), ride_height (высота Root над поверхностью, естественная ~2.2), wheel_min/wheel_max (зазор колёс, естественный ~+1.3; wheel_min < 0.2 => колесо под землёй), position и speed. Требует сидеть в машине",
-			params = {},
-		},
-		{
 			name = "buy_printer",
 			description = "Купить N Money Printer у витрины. Требует стоять у витрины (prompt в зоне досягаемости). Покупка выполняется прямым вводом в ProximityPrompt (без эмуляции клавиш), каждая покупка верифицируется по фактическому приросту числа принтеров; при нехватке денег команда останавливается и возвращает сколько куплено",
 			params = {
@@ -1680,22 +1675,6 @@ function CommandEngine:_navCarCommand(payload)
 	return { success = true, data = res.data }
 end
 
-function CommandEngine:_carStateCommand()
-	if not self.vehicles then
-		return { success = false, error = "vehicles module unavailable" }
-	end
-	local ok, res = pcall(function()
-		return self.vehicles:groundState()
-	end)
-	if not ok then
-		return { success = false, error = tostring(res) }
-	end
-	if not res.success then
-		return { success = false, error = res.error, data = res.data }
-	end
-	return { success = true, data = res.data }
-end
-
 function CommandEngine:_jumpCommand()
 	local humanoid = self:_getHumanoid()
 	if not humanoid then
@@ -2720,8 +2699,6 @@ function CommandEngine:execute(command)
 		result = self:_flyCarCommand(payload)
 	elseif name == "nav_car" then
 		result = self:_navCarCommand(payload)
-	elseif name == "car_state" then
-		result = self:_carStateCommand()
 	elseif name == "jump" then
 		result = self:_jumpCommand()
 	elseif name == "hold_key" then
