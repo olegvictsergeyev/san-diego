@@ -70,29 +70,49 @@ function HttpClient:request(method, path, body, headers, query)
 	headers = headers or {}
 	headers["Content-Type"] = headers["Content-Type"] or "application/json"
 
-	local ok, res = pcall(function()
-		if requestFunc then
-			local opts = {
-				Url = url,
-				Method = method,
-				Headers = headers,
-			}
-			if body then
-				opts.Body = typeof(body) == "string" and body or HttpService:JSONEncode(body)
+	-- Watchdog-таймаут: у экзекьюторных request/http_request нет гарантированного
+	-- таймаута, а после телепорта запрос может зависнуть НАВСЕГДА (молча, без
+	-- ошибки) — так зависали fetcher/status loop. Запускаем запрос в потоке и
+	-- ждём результата не дольше self.timeout; зависший поток изолируем.
+	local done = false
+	local threadResult = nil
+	task.spawn(function()
+		local ok, res = pcall(function()
+			if requestFunc then
+				local opts = {
+					Url = url,
+					Method = method,
+					Headers = headers,
+				}
+				if body then
+					opts.Body = typeof(body) == "string" and body or HttpService:JSONEncode(body)
+				end
+				return requestFunc(opts)
+			else
+				local opts = {
+					Url = url,
+					Method = method,
+					Headers = headers,
+				}
+				if body then
+					opts.Body = typeof(body) == "string" and body or HttpService:JSONEncode(body)
+				end
+				return HttpService:RequestAsync(opts)
 			end
-			return requestFunc(opts)
-		else
-			local opts = {
-				Url = url,
-				Method = method,
-				Headers = headers,
-			}
-			if body then
-				opts.Body = typeof(body) == "string" and body or HttpService:JSONEncode(body)
-			end
-			return HttpService:RequestAsync(opts)
-		end
+		end)
+		threadResult = { ok = ok, res = res }
+		done = true
 	end)
+
+	local timeoutAt = tick() + (tonumber(self.timeout) or 60)
+	while not done and tick() < timeoutAt do
+		task.wait(0.5)
+	end
+	if not done then
+		return false, "request timeout after " .. tostring(self.timeout) .. "s: " .. tostring(method) .. " " .. tostring(path)
+	end
+
+	local ok, res = threadResult.ok, threadResult.res
 
 	if not ok then
 		return false, tostring(res)
