@@ -928,8 +928,10 @@ function CommandEngine:_moveAxis(axis, payload)
 			blockedReason = reason
 		end
 	end
-	if not setHrpCFrame(CFrame.new(finalPos) * CFrame.Angles(0, startYaw, 0)) then
-		return { success = false, error = "HumanoidRootPart lost during movement" }
+	if not blockedReason then
+		if not setHrpCFrame(CFrame.new(finalPos) * CFrame.Angles(0, startYaw, 0)) then
+			return { success = false, error = "HumanoidRootPart lost during movement" }
+		end
 	end
 
 	local finalHrp = self:_getHrp()
@@ -1058,8 +1060,10 @@ function CommandEngine:_moveTo(payload)
 			blockedReason = reason
 		end
 	end
-	if not setHrpCFrame(CFrame.new(finalTarget) * CFrame.Angles(0, startYaw, 0)) then
-		return { success = false, error = "HumanoidRootPart lost during movement" }
+	if not blockedReason then
+		if not setHrpCFrame(CFrame.new(finalTarget) * CFrame.Angles(0, startYaw, 0)) then
+			return { success = false, error = "HumanoidRootPart lost during movement" }
+		end
 	end
 
 	local finalHrp = self:_getHrp()
