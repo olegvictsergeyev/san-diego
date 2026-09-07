@@ -307,14 +307,14 @@ function CommandEngine:getCommandsSpec()
 		},
 		{
 			name = "rent_apartment",
-			description = "Арендовать номер отеля: тот же серверный вызов, что кнопка Purchase Apartment на двери (без нажатия E). Если номер уже арендован — покупка не выполняется, возвращается already_rented. Персонаж должен стоять у неарендованной парадной двери (ближайшей или указанной apartment_id, до 20 ст). Требует команды Civilian",
+			description = "Арендовать номер отеля: тот же серверный вызов, что кнопка Purchase Apartment на двери (без нажатия E). Если номер уже арендован — покупка не выполняется, возвращается already_rented. Персонаж должен стоять у неарендованной парадной двери (до 20 ст). apartment_id: конкретный номер, 0 или не передан — ближайшая свободная дверь. Требует команды Civilian",
 			params = {
 				apartment_id = {
 					type = "integer",
 					required = false,
-					min = 1,
+					min = 0,
 					max = 10000,
-					description = "ApartmentId конкретного номера (по умолчанию — ближайшая свободная парадная дверь)",
+					description = "ApartmentId конкретного номера; 0 или не передан — ближайшая свободная парадная дверь",
 				},
 			},
 		},
@@ -2713,8 +2713,12 @@ function CommandEngine:_rentApartmentCommand(payload)
 		return { success = false, error = "apartments module unavailable" }
 	end
 	local apartmentId = payload and payload.apartment_id
+	if apartmentId == 0 then
+		-- 0 = ближайшая свободная дверь (как непереданный параметр)
+		apartmentId = nil
+	end
 	if apartmentId ~= nil and (typeof(apartmentId) ~= "number" or apartmentId % 1 ~= 0 or apartmentId < 1 or apartmentId > 10000) then
-		return { success = false, error = "apartment_id must be an integer in [1, 10000]" }
+		return { success = false, error = "apartment_id must be an integer in [1, 10000] (or 0 for nearest)" }
 	end
 	local ok, res = pcall(function()
 		return self.apartments:rent(apartmentId, function()

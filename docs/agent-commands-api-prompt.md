@@ -159,7 +159,7 @@ POST /commands/{id}/status
     {
       "name": "rent_apartment",
       "params": {
-        "apartment_id": { "type": "integer", "min": 1, "max": 10000 }
+        "apartment_id": { "type": "integer", "min": 0, "max": 10000 }
       }
     },
     {
