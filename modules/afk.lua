@@ -113,11 +113,31 @@ function Afk:_simulateActivity()
 		return
 	end
 
+	-- Прыжок МИНИМАЛЬНОЙ высоты: временно занижаем JumpHeight/JumpPower,
+	-- прыгаем, через 0.5 с возвращаем исходные значения. Высота прыжка
+	-- на анти-AFK не влияет — важен сам факт активности, а низкий прыжок
+	-- не отвлекает и не дёргает камеру.
 	pcall(function()
 		humanoid.PlatformStand = false
 		humanoid.Sit = false
+	end)
+	local oldJumpPower = humanoid.JumpPower
+	local oldJumpHeight = humanoid.JumpHeight
+	local useJumpPower = humanoid.UseJumpPower
+	pcall(function()
+		if useJumpPower then
+			humanoid.JumpPower = 1
+		else
+			humanoid.JumpHeight = 0.05
+		end
 		humanoid.Jump = true
 		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+	end)
+	task.delay(0.5, function()
+		pcall(function()
+			humanoid.JumpPower = oldJumpPower
+			humanoid.JumpHeight = oldJumpHeight
+		end)
 	end)
 end
 
