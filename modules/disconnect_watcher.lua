@@ -65,6 +65,16 @@ function DisconnectWatcher:_onPromptShown()
 	if self.handled then
 		return
 	end
+
+	-- Во время намеренного телепорта (join_private_server) Roblox может
+	-- кратко показать ErrorPrompt — это НЕ дисконнект, бэкенду не шлём.
+	local teleporting = getgenv().SanDiegoAgentTeleporting == true
+		or (self.agent and self.agent.teleporting == true)
+	if teleporting then
+		self:_log("teleport in progress, ignoring ErrorPrompt")
+		return
+	end
+
 	self.handled = true
 
 	local info = self:_readErrorInfo()

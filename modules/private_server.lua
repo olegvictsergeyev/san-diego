@@ -16,6 +16,40 @@ function PrivateServer:setCommandEngine(commandEngine)
 	self.commandEngine = commandEngine
 end
 
+function PrivateServer:setResultStore(resultStore)
+	self.resultStore = resultStore
+end
+
+-- Флаг перехода храним и в genv (для текущего сервера), и файлом (getgenv
+-- НЕ переживает телепорт — новый инстанс агента восстановит флаг из файла).
+function PrivateServer:_setTeleporting(value, extra)
+	if value then
+		getgenv().SanDiegoAgentTeleporting = true
+		getgenv().SanDiegoAgentTeleportFailed = nil
+		getgenv().SanDiegoAgentTeleportJobId = tostring(game.JobId or "")
+	else
+		getgenv().SanDiegoAgentTeleporting = nil
+	end
+	if extra and extra.failed then
+		getgenv().SanDiegoAgentTeleportFailed = tostring(extra.failed)
+	end
+	if self.resultStore then
+		local state = {
+			teleporting = value == true,
+			jobId = tostring(game.JobId or ""),
+			savedAt = tick(),
+		}
+		if extra then
+			for k, v in pairs(extra) do
+				state[k] = v
+			end
+		end
+		pcall(function()
+			self.resultStore:saveTeleportState(state)
+		end)
+	end
+end
+
 -- Ошибка доводится до CommandEngine/Agent: результат join_private_server
 -- может быть уже персистнут как "completed", его нужно перезаписать ошибкой.
 function PrivateServer:_notifyTeleportFailed(err)
@@ -92,9 +126,7 @@ function PrivateServer:joinByCode(code)
 	-- бэкендная команда не выполнилась на старом сервере, пока идёт
 	-- переход. Результат join_private_server доставляет агент, стартовавший
 	-- УЖЕ на новом сервере (result_store переживает телепорт через файл).
-	getgenv().SanDiegoAgentTeleporting = true
-	getgenv().SanDiegoAgentTeleportFailed = nil
-	getgenv().SanDiegoAgentTeleportJobId = tostring(game.JobId or "")
+	self:_setTeleporting(true)
 
 	-- Сторож: если через 90 секунд мы всё ещё на том же JobId, телепорт так
 	-- и не начался — снимаем флаг, чтобы агент не завис навсегда.
@@ -104,8 +136,7 @@ function PrivateServer:joinByCode(code)
 			and getgenv().SanDiegoAgentTeleportJobId == watchedJobId
 			and tostring(game.JobId or "") == watchedJobId then
 			warn("[SanDiegoAgent][PrivateServer] teleport did not start within 90s, releasing teleport flag")
-			getgenv().SanDiegoAgentTeleporting = nil
-			getgenv().SanDiegoAgentTeleportFailed = "teleport did not start within 90s"
+			self:_setTeleporting(false, { failed = "teleport did not start within 90s" })
 		end
 	end)
 
@@ -124,13 +155,11 @@ function PrivateServer:joinByCode(code)
 		end)
 		if not joinOk then
 			warn("[SanDiegoAgent][PrivateServer] JoinServerByCode failed:", tostring(joinResult))
-			getgenv().SanDiegoAgentTeleporting = nil
-			getgenv().SanDiegoAgentTeleportFailed = tostring(joinResult)
+			self:_setTeleporting(false, { failed = tostring(joinResult) })
 			self:_notifyTeleportFailed(tostring(joinResult))
 		elseif typeof(joinResult) == "table" and joinResult.Success == false then
 			warn("[SanDiegoAgent][PrivateServer] JoinServerByCode rejected:", tostring(joinResult.Message))
-			getgenv().SanDiegoAgentTeleporting = nil
-			getgenv().SanDiegoAgentTeleportFailed = tostring(joinResult.Message or "join rejected")
+			self:_setTeleporting(false, { failed = tostring(joinResult.Message or "join rejected") })
 			self:_notifyTeleportFailed(tostring(joinResult.Message or "join rejected"))
 		else
 			print("[SanDiegoAgent][PrivateServer] JoinServerByCode invoked, teleport should start")

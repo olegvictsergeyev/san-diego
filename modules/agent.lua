@@ -90,10 +90,18 @@ function Agent.new(config, httpClient, stateCollector, commandEngine, afk, resul
 	self.lastStatusData = nil
 	self.lastStatusSendAt = 0
 	self.currentCommandHeartbeat = nil
+	self.teleporting = false
 
 	self.lastCommandFinishedAt = 0
 
 	return self
+end
+
+-- Переход на другой сервер в процессе. Флаг живёт в genv (текущий сервер)
+-- и в файле (getgenv НЕ переживает телепорт — новый инстанс агента
+-- восстанавливает флаг из teleport-state.json при старте).
+function Agent:_isTeleporting()
+	return self.teleporting == true or getgenv().SanDiegoAgentTeleporting == true
 end
 
 function Agent:_log(level, ...)
@@ -275,7 +283,7 @@ function Agent:_sendPendingResults()
 	if not self.resultStore then
 		return
 	end
-	if getgenv().SanDiegoAgentTeleporting then
+	if self:_isTeleporting() then
 		-- Во время телепорта результаты не шлём: результат join_private_server
 		-- доставит агент на новом сервере, когда клиент будет готов принимать
 		-- следующие команды.
@@ -301,7 +309,7 @@ function Agent:_retryLoop()
 		if not self.running then
 			break
 		end
-		if getgenv().SanDiegoAgentTeleporting then
+		if self:_isTeleporting() then
 			-- Пока идёт переход на другой сервер, отправку отложенных
 			-- результатов тоже приостанавливаем.
 			continue
@@ -495,7 +503,7 @@ function Agent:_handleCommand(command)
 	if self.resultStore then
 		local stillPending = self.resultStore:getPending()[tostring(command.id)] ~= nil
 		if stillPending then
-			if command.name == "join_private_server" and getgenv().SanDiegoAgentTeleporting then
+			if command.name == "join_private_server" and self:_isTeleporting() then
 				self:_log("INFO", "join_private_server result deferred to post-teleport delivery", command.id)
 			else
 				self:_log("WARN", "command finished but result not delivered; queued for retry", command.id, command.name)
@@ -536,7 +544,7 @@ end
 
 function Agent:_fetcherLoop()
 	while self.running do
-		if getgenv().SanDiegoAgentTeleporting then
+		if self:_isTeleporting() then
 			-- Идёт переход на другой сервер: новые команды не забираем,
 			-- чтобы они не выполнились на старом сервере. Они остаются на
 			-- бэкенде и будут приняты в работу агентом уже на новом сервере.
@@ -566,7 +574,7 @@ end
 
 function Agent:_workerLoop()
 	while self.running do
-		if getgenv().SanDiegoAgentTeleporting then
+		if self:_isTeleporting() then
 			-- Переход на другой сервер: из очереди не достаём, команда
 			-- должна выполниться уже на новом сервере.
 			task.wait(0.1)
@@ -624,14 +632,20 @@ function Agent:start()
 	-- Сбрасываем возможный disconnect из прошлой сессии.
 	self:clearError()
 
-	-- Ожидание готовности после телепорта. Флаг SanDiegoAgentTeleporting
-	-- переживает телепорт через genv: пока он стоит, клиент догружает новый
-	-- сервер. Ждём персонажа и фиксированную паузу, затем снимаем флаг,
-	-- доставляем результат join_private_server и только после этого fetcher
-	-- начнёт забирать новые команды — они будут приняты в работу уже на
+	-- Ожидание готовности после телепорта. getgenv() на целевых экзекьюторах
+	-- НЕ переживает телепорт, поэтому флаг перехода восстанавливаем из файла
+	-- teleport-state.json, который старый инстанс агента записал ДО вызова
+	-- телепорта. Пока флаг стоит: ждём персонажа и фиксированную паузу,
+	-- затем доставляем результат join_private_server, и только после этого
+	-- fetcher начнёт забирать команды — они будут приняты в работу уже на
 	-- новом сервере.
-	if getgenv().SanDiegoAgentTeleporting then
-		self:_log("INFO", "teleport flag detected, waiting for client readiness")
+	local teleportState = self.resultStore and self.resultStore:getTeleportState() or nil
+	if teleportState
+		and teleportState.teleporting
+		and (tick() - (tonumber(teleportState.savedAt) or 0)) < 600 then
+		self.teleporting = true
+		getgenv().SanDiegoAgentTeleporting = true
+		self:_log("INFO", "teleport state detected, waiting for client readiness")
 		local Players = game:GetService("Players")
 		local timeoutAt = tick() + 30
 		while tick() < timeoutAt do
@@ -642,9 +656,15 @@ function Agent:start()
 			task.wait(0.5)
 		end
 		task.wait(self.config.postTeleportReadyDelay or 8)
-		getgenv().SanDiegoAgentTeleporting = nil
-		getgenv().SanDiegoAgentTeleportFailed = nil
 		self:_log("INFO", "client ready after teleport, resuming command processing")
+	end
+	self.teleporting = false
+	getgenv().SanDiegoAgentTeleporting = nil
+	getgenv().SanDiegoAgentTeleportFailed = nil
+	if self.resultStore then
+		pcall(function()
+			self.resultStore:clearTeleportState()
+		end)
 	end
 
 	-- Пытаемся доставить результаты, оставшиеся с прошлого запуска

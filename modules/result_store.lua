@@ -9,6 +9,7 @@ function ResultStore.new(compat, nickname)
 		compat = compat,
 		folder = "SanDiegoAgent",
 		file = "SanDiegoAgent/pending-results" .. suffix .. ".json",
+		teleportFile = "SanDiegoAgent/teleport-state" .. suffix .. ".json",
 	}, ResultStore)
 end
 
@@ -49,6 +50,48 @@ function ResultStore:_read()
 		return nil
 	end
 	return data
+end
+
+-- Файловое состояние телепорта. getgenv() на целевых экзекьюторах НЕ
+-- переживает телепорт, поэтому флаг перехода и причина отказа хранятся
+-- файлом — новый инстанс агента на новом сервере читает его при старте.
+function ResultStore:saveTeleportState(fields)
+	if not self.compat or not self.compat.writeFile then
+		return false
+	end
+	local ok, json = pcall(function()
+		return HttpService:JSONEncode(fields)
+	end)
+	if not ok then
+		return false
+	end
+	self:_ensureFolder()
+	return self.compat.writeFile(self.teleportFile, json)
+end
+
+function ResultStore:getTeleportState()
+	if not (self.compat and self.compat.readFile) then
+		return nil
+	end
+	local ok, content = self.compat.readFile(self.teleportFile)
+	if not ok or not content or content == "" then
+		return nil
+	end
+	local parseOk, data = pcall(function()
+		return HttpService:JSONDecode(content)
+	end)
+	if not parseOk or typeof(data) ~= "table" then
+		return nil
+	end
+	return data
+end
+
+function ResultStore:clearTeleportState()
+	if not (self.compat and self.compat.writeFile) then
+		return false
+	end
+	self:_ensureFolder()
+	return self.compat.writeFile(self.teleportFile, "{}")
 end
 
 function ResultStore:getPending()

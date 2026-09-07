@@ -9,7 +9,7 @@
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-	version = "2.12.2",
+	version = "2.12.3",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -165,6 +165,7 @@ local function makeAgent()
     local engine = CommandEngine.new(privateServer, afk, state, printers, vehicles, apartments)
     privateServer:setCommandEngine(engine)
     local resultStore = ResultStore.new(Compat, state:getNickname())
+    privateServer:setResultStore(resultStore)
     return Agent.new(CONFIG, http, state, engine, afk, resultStore)
 end
 
