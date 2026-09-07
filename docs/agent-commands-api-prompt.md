@@ -148,7 +148,9 @@ POST /commands/{id}/status
     },
     {
       "name": "respawn",
-      "params": {}
+      "params": {
+        "skip_in_spawn": { "type": "boolean" }
+      }
     },
     {
       "name": "spawn_vehicle",

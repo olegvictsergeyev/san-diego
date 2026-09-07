@@ -289,8 +289,14 @@ function CommandEngine:getCommandsSpec()
 		},
 		{
 			name = "respawn",
-			description = "Умереть и возродиться. Команда завершается только когда персонаж полностью готов выполнять новые команды (новый character, живой гуманоид, HumanoidRootPart); таймаут готовности 30 с",
-			params = {},
+			description = "Умереть и возродиться. Команда завершается только когда персонаж полностью готов выполнять новые команды (новый character, живой гуманоид, HumanoidRootPart); таймаут готовности 30 с. skip_in_spawn=true — не респавниться, если персонаж уже в зоне спавна (успех с respawned=false, skipped=true)",
+			params = {
+				skip_in_spawn = {
+					type = "boolean",
+					required = false,
+					description = "true = не респавниться, если персонаж уже в зоне спавна (его TeamColor или Neutral SpawnLocation, до 6 ст от края площадки); возвращает успех с respawned=false, skipped=true",
+				},
+			},
 		},
 		{
 			name = "spawn_vehicle",
@@ -1399,13 +1405,72 @@ function CommandEngine:_pause(payload)
 	return { success = true, data = { elapsed = math.round(elapsed * 10) / 10 } }
 end
 
-function CommandEngine:_respawn()
+-- Зона спавна: включённые SpawnLocation игрока (его TeamColor или
+-- Neutral) рядом с персонажем — по XZ в пределах полуплощадки + 6 ст,
+-- по высоте от -5 до +8 от площадки. Возвращает inZone, spawnName.
+function CommandEngine:_isInSpawnZone()
+	local hrp = self:_getHrp()
+	if not hrp then
+		return false, nil
+	end
+	local player = self:_getPlayer()
+	local pos = hrp.Position
+	local ok, inZone, spawnName = pcall(function()
+		for _, inst in ipairs(workspace:GetDescendants()) do
+			if inst:IsA("SpawnLocation") and inst.Enabled then
+				local teamOk = inst.Neutral
+				if not teamOk and player then
+					teamOk = inst.TeamColor == player.TeamColor
+				end
+				if teamOk then
+					local dx = math.abs(pos.X - inst.Position.X)
+					local dz = math.abs(pos.Z - inst.Position.Z)
+					local dy = pos.Y - inst.Position.Y
+					if dx <= inst.Size.X / 2 + 6
+						and dz <= inst.Size.Z / 2 + 6
+						and dy >= -5 and dy <= 8
+					then
+						return true, inst.Name
+					end
+				end
+			end
+		end
+		return false, nil
+	end)
+	if ok then
+		return inZone, spawnName
+	end
+	return false, nil
+end
+
+function CommandEngine:_respawn(payload)
+	local skipInSpawn = false
+	if payload and payload.skip_in_spawn ~= nil then
+		if typeof(payload.skip_in_spawn) ~= "boolean" then
+			return { success = false, error = "skip_in_spawn must be a boolean" }
+		end
+		skipInSpawn = payload.skip_in_spawn
+	end
 	local humanoid = self:_getHumanoid()
 	if not humanoid then
 		return { success = false, error = "Humanoid not found" }
 	end
 	if self:_isCancelled() then
 		return { success = false, error = "cancelled" }
+	end
+	if skipInSpawn then
+		local inSpawn, spawnName = self:_isInSpawnZone()
+		if inSpawn then
+			return {
+				success = true,
+				data = {
+					respawned = false,
+					skipped = true,
+					in_spawn = true,
+					spawn = spawnName,
+				},
+			}
+		end
 	end
 	local player = self:_getPlayer()
 	humanoid.Health = 0
@@ -1452,7 +1517,7 @@ function CommandEngine:_respawn()
 		end
 	end
 
-	return { success = true, data = { respawned = true } }
+	return { success = true, data = { respawned = true, skipped = false } }
 end
 
 function CommandEngine:_transferMoneyViaRespawn(payload)
@@ -3164,7 +3229,7 @@ function CommandEngine:execute(command)
 	elseif name == "pause" then
 		result = self:_pause(payload)
 	elseif name == "respawn" then
-		result = self:_respawn()
+		result = self:_respawn(payload)
 	elseif name == "transfer_money_via_respawn" then
 		result = self:_transferMoneyViaRespawn(payload)
 	elseif name == "respawn_for_money" then
