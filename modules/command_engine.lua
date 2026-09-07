@@ -275,7 +275,7 @@ function CommandEngine:getCommandsSpec()
 		},
 		{
 			name = "respawn",
-			description = "Умереть и возродиться",
+			description = "Умереть и возродиться. Команда завершается только когда персонаж полностью готов выполнять новые команды (новый character, живой гуманоид, HumanoidRootPart); таймаут готовности 30 с",
 			params = {},
 		},
 		{
@@ -1270,10 +1270,10 @@ function CommandEngine:_respawn()
 	if self:_isCancelled() then
 		return { success = false, error = "cancelled" }
 	end
+	local player = self:_getPlayer()
 	humanoid.Health = 0
 
 	-- После возрождения сбрасываем time_2.
-	local player = self:_getPlayer()
 	if player and self.state and self.state.setTimer then
 		local state = self.state
 		local connection
@@ -1290,6 +1290,29 @@ function CommandEngine:_respawn()
 				connection = nil
 			end
 		end)
+	end
+
+	-- Команда завершается только когда персонаж готов выполнять новые
+	-- команды: новый character с живым гуманоидом и HumanoidRootPart.
+	if player then
+		local t0 = tick()
+		local ready = false
+		while tick() - t0 < 30 do
+			if self:_isCancelled() then
+				return { success = false, error = "cancelled" }
+			end
+			local char = player.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			local hrp = char and char:FindFirstChild("HumanoidRootPart")
+			if char and hum and hrp and hum.Health > 0 then
+				ready = true
+				break
+			end
+			task.wait(0.25)
+		end
+		if not ready then
+			return { success = false, error = "respawn timeout: character not ready after 30s" }
+		end
 	end
 
 	return { success = true, data = { respawned = true } }

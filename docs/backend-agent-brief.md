@@ -101,7 +101,7 @@ Long-poll. Query-параметры:
 - `move_x`, `move_y`, `move_z` — параметры `value` (number, -7000..7000) и `speed` (integer, 1..10, опционально, по умолчанию 10).
 - `move_to` — параметры `x` (number, -7000..7000), `z` (number, -7000..7000) и `speed` (integer, 1..10, опционально, по умолчанию 10). Плавно перемещает персонажа к координатам X/Z с сохранением текущей высоты Y.
 - `pause` — параметр `duration` (number, 0..86400).
-- `respawn` — без параметров.
+- `respawn` — без параметров. Умирает и ждёт готовности: команда завершается только когда персонаж снова может выполнять команды (новый character, живой гуманоид, HumanoidRootPart, до 30 с, при таймауте — ошибка).
 - `spawn_vehicle` — параметр `name` (string, 1..64) — имя техники как в списке спавнера (`ducati`, `C63DTM`, `911`). Заспавнить технику с ближайшей VehicleSpawner-площадки (в радиусе 50 ст от персонажа) без открытия панели: прямой вызов серверного ремоута `VehicleSpawnerService:SpawnVehicleFromSpawner`, сервер валидирует доступ/владение. При успехе персонаж садится в технику. Результат: `spawned`, `position`, `spawner_distance`.
 - `transfer_money_via_respawn` — цикл: параметры `identifier`, `amount`, `max_attempts`, `wait_seconds`. Повторяет respawn, пока баланс цели не достигнет `amount`. Перед каждым respawn'ом агент преследует цель, чтобы деньги упали рядом.
 - `respawn_for_money` — одна итерация: параметры `identifier`, `amount`, `wait_seconds`. Проверяет баланс цели, преследует её, делает respawn, ждёт и возвращает `reached`, `before_balance`, `after_balance`, `respawned`.
