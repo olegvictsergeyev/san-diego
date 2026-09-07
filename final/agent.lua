@@ -57,11 +57,17 @@ do
 		"end)",
 	}, "\n")
 	local q = queue_on_teleport
-	if typeof(q) == "function" then
+	-- Ставим в очередь только при реальной смене сервера: перезапуск
+	-- лоадера на том же JobId не должен плодить копии в очереди.
+	if typeof(q) == "function" and getgenv().SanDiegoAgentLastStartJobId ~= currentJobId then
 		local ok = pcall(q, reloadCode)
 		print("[SanDiegoAgent] queue_on_teleport armed:", tostring(ok))
 	else
-		warn("[SanDiegoAgent] queue_on_teleport unavailable; relying on autoexec")
+		if typeof(q) ~= "function" then
+			warn("[SanDiegoAgent] queue_on_teleport unavailable; relying on autoexec")
+		else
+			print("[SanDiegoAgent] queue_on_teleport skipped: already on this server")
+		end
 	end
 end
 
