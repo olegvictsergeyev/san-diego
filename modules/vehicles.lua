@@ -526,18 +526,23 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel)
 			phase = "brake"
 		end
 		vmax = math.max(vmax, speed)
-		-- сторож застревания: команда есть, расстояние до цели не убывает
+		-- сторож застревания, сильно ослабленный: только в фазе разгона/
+		-- крейсера, только пока цель не пройдена, окно 4 с. Перелёт цели
+		-- с медленным торможением (байк сохраняет импульс, реальное
+		-- замедление слабее BRAKE_REAL) — допустим и НЕ считается ошибкой.
 		local targetDist = (Vector2.new(targetX, laneZ) - Vector2.new(p.X, p.Z)).Magnitude
-		if tick() - stuckAt >= 1.5 then
-			if v > 10 and (stuckDist - targetDist) < 1.5 then
-				abortReason = "stuck/locked"
-				v = 0
-				pcall(function()
-					s.bv.Velocity = Vector3.zero
-				end)
-				break
+		if phase ~= "brake" and dir * (targetX - p.X) > 0 then
+			if tick() - stuckAt >= 4 then
+				if v > 10 and (stuckDist - targetDist) < 1.5 then
+					abortReason = "stuck/locked"
+					v = 0
+					pcall(function()
+						s.bv.Velocity = Vector3.zero
+					end)
+					break
+				end
+				stuckAt, stuckDist = tick(), targetDist
 			end
-			stuckAt, stuckDist = tick(), targetDist
 		end
 		task.wait(self.DT)
 	end

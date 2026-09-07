@@ -194,6 +194,19 @@ function Agent:_resultToString(result)
 				return HttpService:JSONEncode(result.data)
 			end)
 			if ok then
+				-- ошибка + данные: сохраняем оба, иначе диагностика
+				-- теряется и бэкенд видит error-статус с телом успеха.
+				-- "cancelled" не подмешиваем: статус cancelled уже
+				-- передаёт смысл, а формат data-JSON менять не стоит.
+				if result.error and result.error ~= "cancelled" then
+					local okCombo, combined = pcall(function()
+						return HttpService:JSONEncode({ error = tostring(result.error), data = result.data })
+					end)
+					if okCombo then
+						return combined
+					end
+					return tostring(result.error) .. " | " .. encoded
+				end
 				return encoded
 			end
 		end
