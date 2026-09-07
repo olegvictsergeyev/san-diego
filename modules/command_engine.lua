@@ -279,6 +279,19 @@ function CommandEngine:getCommandsSpec()
 			params = {},
 		},
 		{
+			name = "spawn_vehicle",
+			description = "Заспавнить технику с ближайшей VehicleSpawner-площадки без открытия панели (без клавиши E). Сервер сам решает вопросы доступа и владения",
+			params = {
+				name = {
+					type = "string",
+					required = true,
+					min = 1,
+					max = 64,
+					description = "Имя техники как в списке спавнера (например ducati, C63DTM, 911)",
+				},
+			},
+		},
+		{
 			name = "transfer_money_via_respawn",
 			description = "Передавать деньги целевому игроку через respawn, пока его баланс не достигнет заданной суммы",
 			params = {
@@ -2784,6 +2797,115 @@ function CommandEngine:_getPlayerCommand(payload)
 	}
 end
 
+-- Спавн техники с ближайшей VehicleSpawner-площадки без открытия панели (E).
+-- Вызывает тот же Pronghorn-ремоут, что кнопка панели: сервер валидирует
+-- доступ/владение и спавнит технику на площадке.
+function CommandEngine:_spawnVehicleCommand(payload)
+	local name = payload.name
+	if type(name) ~= "string" or #name == 0 then
+		return { success = false, error = "param 'name' must be a non-empty string" }
+	end
+	if #name > 64 then
+		return { success = false, error = "param 'name' too long (max 64)" }
+	end
+
+	local hrp = self:_getHrp()
+	if not hrp then
+		return { success = false, error = "character not available" }
+	end
+
+	local gameplay = workspace:FindFirstChild("Gameplay")
+	local spawnersFolder = gameplay and gameplay:FindFirstChild("VehicleSpawners")
+	if not spawnersFolder then
+		return { success = false, error = "VehicleSpawners folder not found" }
+	end
+
+	local nearest, nearestDist = nil, math.huge
+	for _, spawner in ipairs(spawnersFolder:GetChildren()) do
+		if spawner.Name == "VehicleSpawner" then
+			local okPos, pos = pcall(function()
+				return spawner:GetPivot().Position
+			end)
+			if okPos and pos then
+				local dist = (pos - hrp.Position).Magnitude
+				if dist < nearestDist then
+					nearest = spawner
+					nearestDist = dist
+				end
+			end
+		end
+	end
+	if not nearest then
+		return { success = false, error = "no VehicleSpawner models found" }
+	end
+	if nearestDist > 50 then
+		return { success = false, error = string.format("no vehicle spawner nearby (nearest is %.0f studs away)", nearestDist) }
+	end
+
+	local okRequire, client = pcall(function()
+		return require(game.ReplicatedStorage.SharedModules.Pronghorn.Remotes).Client
+	end)
+	if not okRequire or not client or not client.VehicleSpawnerService then
+		return { success = false, error = "vehicle spawner remotes unavailable: " .. tostring(client) }
+	end
+
+	local vehiclesFolder = workspace:FindFirstChild("Vehicles")
+	local before = {}
+	if vehiclesFolder then
+		for _, v in ipairs(vehiclesFolder:GetChildren()) do
+			before[v] = true
+		end
+	end
+
+	local okCall, spawnResult = pcall(function()
+		return client.VehicleSpawnerService:SpawnVehicleFromSpawner(nearest, name)
+	end)
+	if not okCall then
+		return { success = false, error = "spawn call failed: " .. tostring(spawnResult) }
+	end
+	if not spawnResult then
+		return { success = false, error = "server rejected spawn of '" .. name .. "'" }
+	end
+
+	-- ожидание появления техники (новый экземпляр в Workspace.Vehicles)
+	local spawned = nil
+	if vehiclesFolder then
+		local deadline = tick() + 8
+		while tick() < deadline do
+			for _, v in ipairs(vehiclesFolder:GetChildren()) do
+				if not before[v] then
+					spawned = v
+					break
+				end
+			end
+			if spawned then
+				break
+			end
+			task.wait(0.25)
+		end
+	end
+
+	local data = {
+		name = name,
+		spawner_distance = math.round(nearestDist * 10) / 10,
+		spawned = spawned ~= nil,
+	}
+	if spawned then
+		local okPivot, pivot = pcall(function()
+			return spawned:GetPivot().Position
+		end)
+		if okPivot and pivot then
+			data.position = {
+				x = math.round(pivot.X * 10) / 10,
+				y = math.round(pivot.Y * 10) / 10,
+				z = math.round(pivot.Z * 10) / 10,
+			}
+		end
+	end
+
+	return { success = true, data = data }
+end
+
 function CommandEngine:execute(command)
 	local name = command.name
 	local payload = command.payload or {}
@@ -2830,6 +2952,8 @@ function CommandEngine:execute(command)
 		result = self:_navCarCommand(payload)
 	elseif name == "drive" then
 		result = self:_driveCommand(payload)
+	elseif name == "spawn_vehicle" then
+		result = self:_spawnVehicleCommand(payload)
 	elseif name == "jump" then
 		result = self:_jumpCommand()
 	elseif name == "hold_key" then

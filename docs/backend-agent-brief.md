@@ -102,6 +102,7 @@ Long-poll. Query-параметры:
 - `move_to` — параметры `x` (number, -7000..7000), `z` (number, -7000..7000) и `speed` (integer, 1..10, опционально, по умолчанию 10). Плавно перемещает персонажа к координатам X/Z с сохранением текущей высоты Y.
 - `pause` — параметр `duration` (number, 0..86400).
 - `respawn` — без параметров.
+- `spawn_vehicle` — параметр `name` (string, 1..64) — имя техники как в списке спавнера (`ducati`, `C63DTM`, `911`). Заспавнить технику с ближайшей VehicleSpawner-площадки (в радиусе 50 ст от персонажа) без открытия панели: прямой вызов серверного ремоута `VehicleSpawnerService:SpawnVehicleFromSpawner`, сервер валидирует доступ/владение. При успехе персонаж садится в технику. Результат: `spawned`, `position`, `spawner_distance`.
 - `transfer_money_via_respawn` — цикл: параметры `identifier`, `amount`, `max_attempts`, `wait_seconds`. Повторяет respawn, пока баланс цели не достигнет `amount`. Перед каждым respawn'ом агент преследует цель, чтобы деньги упали рядом.
 - `respawn_for_money` — одна итерация: параметры `identifier`, `amount`, `wait_seconds`. Проверяет баланс цели, преследует её, делает respawn, ждёт и возвращает `reached`, `before_balance`, `after_balance`, `respawned`.
 - `get_inventory` — без параметров. Возвращает инвентарь: `held` (предмет в руке или null), `backpack` (словарь имён с количеством), `backpack_total`, `printers_backpack`, `printers_held`, `printers_total` и `printer_ids` (атрибут `PersistentToolId` каждого принтера).

@@ -150,6 +150,12 @@ POST /commands/{id}/status
       "params": {}
     },
     {
+      "name": "spawn_vehicle",
+      "params": {
+        "name": { "type": "string", "min": 1, "max": 64 }
+      }
+    },
+    {
       "name": "transfer_money_via_respawn",
       "params": {
         "identifier": { "type": "string", "min": 1, "max": 64 },
