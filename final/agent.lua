@@ -21,7 +21,9 @@ local BASE_URL = getgenv().SanDiegoAgentBaseUrl or "https://raw.githubuserconten
 -- (getgenv().SanDiegoAgentLastStartJobId). Без фильтра JobId каждый запуск
 -- лоадера ставил бы ещё одну копию в очередь, и при телепорте исполнились
 -- бы все разом (буря рестартов). Сценарий «уже на новом сервере, агент ещё
--- не стартовал» покрывает autoexec/ручной запуск.
+-- не стартовал» покрывает autoexec/ручной запуск. Первая же исполнившаяся
+-- копия «захватывает» JobId (SanDiegoAgentTeleportHandledJobId), так что при
+-- бурсте из очереди работает ровно одна копия.
 do
 	-- ПЕРЕЖИВАЕМ ТЕЛЕПОРТ: ставим в очередь перезапуск ТОЛЬКО при смене
 	-- JobId. Сценарий «уже на новом сервере, агент ещё не стартовал»
@@ -34,6 +36,12 @@ do
 		"task.spawn(function()",
 		"	local jobId = tostring(game.JobId or \"\")",
 		"	if getgenv().SanDiegoAgentLastStartJobId == jobId then return end",
+	-- Дедупликация бурста: если из очереди исполняется сразу несколько
+	-- копий (например, скопившиеся до фикса), работает только первая.
+	-- Между проверкой и записью нет приостановок, так что в Luau это
+	-- атомарно: остальные копии завершаются сразу.
+		"	if getgenv().SanDiegoAgentTeleportHandledJobId == jobId then return end",
+		"	getgenv().SanDiegoAgentTeleportHandledJobId = jobId",
 		"	local function reloadAttempt(n)",
 		"		if getgenv().SanDiegoAgentLastStartJobId == jobId then return true end",
 		"		local ok, err = pcall(function()",
