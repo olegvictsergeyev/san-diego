@@ -13,19 +13,29 @@ print("[SanDiegoAgent] loader started, JobId:", currentJobId)
 
 local BASE_URL = getgenv().SanDiegoAgentBaseUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main"
 
--- Переживаем телепорты: СРАЗУ (до любых рискованных операций) ставим в
--- очередь перезапуск этого же загрузчика на новом сервере. Очередной код
--- дожидается полной загрузки игры, повторяет попытки с бэкофом
--- (2/4/8… с, потолок 300 с, до 12 попыток) и проверяет,
--- что агент реально стартовал (getgenv().SanDiegoAgentLastStartJobId).
--- Загрузчик при каждом запуске ставит себя в очередь заново — цикл
--- самоподдерживающийся и покрывает ЛЮБОЙ телепорт, не только join_private_server.
+-- Переживаем телепорт: при смене JobId (т.е. ТОЛЬКО при реальном
+-- телепорте, а не при каждом запуске лоадера) ставим в очередь перезапуск
+-- этого же загрузчика на новом сервере. Очередной код дожидается полной
+-- загрузки игры, повторяет попытки с бэкофом (2/4/8… с, потолок 300 с,
+-- до 12 попыток) и проверяет, что агент реально стартовал
+-- (getgenv().SanDiegoAgentLastStartJobId). Без фильтра JobId каждый запуск
+-- лоадера ставил бы ещё одну копию в очередь, и при телепорте исполнились
+-- бы все разом (буря рестартов). Сценарий «уже на новом сервере, агент ещё
+-- не стартовал» покрывает autoexec/ручной запуск.
 do
+	-- ПЕРЕЖИВАЕМ ТЕЛЕПОРТ: ставим в очередь перезапуск ТОЛЬКО при смене
+	-- JobId. Сценарий «уже на новом сервере, агент ещё не стартовал»
+	-- покрывает autoexec/ручной запуск — без повторных перезапусков.
+	-- Без фильтра каждый вызов лоадера ставил бы ещё одну копию в
+	-- очередь: они складываются и при первом же телепорте исполняются
+	-- все разом (буря из сотен рестартов, рассинхрон консоли).
 	local reloadCode = table.concat({
 		'getgenv().SanDiegoAgentBaseUrl = "' .. BASE_URL .. '"',
 		"task.spawn(function()",
 		"	local jobId = tostring(game.JobId or \"\")",
+		"	if getgenv().SanDiegoAgentLastStartJobId == jobId then return end",
 		"	local function reloadAttempt(n)",
+		"		if getgenv().SanDiegoAgentLastStartJobId == jobId then return true end",
 		"		local ok, err = pcall(function()",
 		"			loadstring(game:HttpGet(\"" .. BASE_URL .. "/final/agent.lua?nocache=\" .. tostring(tick())))()",
 		"		end)",
