@@ -973,6 +973,80 @@ function CommandEngine:_moveAxis(axis, payload)
 	return result
 end
 
+-- Тангенциальный обход препятствия (tangent bug) для move_to: боковые
+-- шаги вдоль стены до тех пор, пока прямой шаг к цели снова не проходит
+-- (_adjustStep сам перешагивает низкие препятствия и прилипает к земле).
+-- Сторона обхода выбирается по свободному пространству по бокам; при
+-- тупике сбоку или повторном посещении клетки сторона меняется. Бюджеты:
+-- длина детура и время. Возвращает true, когда курс к цели открыт.
+function CommandEngine:_avoidAround(hrp, targetPos, stepSize, waitTime, setHrpCFrame, startYaw)
+	local pos = hrp.Position
+	local rx, rz = targetPos.X - pos.X, targetPos.Z - pos.Z
+	local remaining = math.sqrt(rx * rx + rz * rz)
+	if remaining < 0.01 then
+		return false, "at target"
+	end
+	local dirTo = Vector3.new(rx / remaining, 0, rz / remaining)
+	local left = Vector3.new(-dirTo.Z, 0, dirTo.X)
+
+	-- выбор стороны обхода: свободнее пространство по бокам
+	local char = self:_getCharacter()
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { char }
+	local function sideClearance(sideVec)
+		local hit = workspace:Raycast(pos + Vector3.new(0, -1, 0), sideVec * 40, params)
+		return hit and hit.Distance or 40
+	end
+	local side = sideClearance(left) >= sideClearance(left * -1) and 1 or -1
+
+	local maxDetour = math.clamp(remaining * 2, 120, 800)
+	local detour = 0
+	local visited = {}
+	local t0 = tick()
+
+	while detour < maxDetour and tick() - t0 < 120 do
+		if self:_isCancelled() then
+			return false, "cancelled"
+		end
+		local p = hrp.Position
+		local dxr, dzr = targetPos.X - p.X, targetPos.Z - p.Z
+		local rem = math.sqrt(dxr * dxr + dzr * dzr)
+		if rem < 0.5 then
+			return true
+		end
+		-- курс к цели открыт? — обход окончен
+		local d = Vector3.new(dxr / rem, 0, dzr / rem)
+		local advance = math.min(stepSize, rem)
+		local probe = self:_adjustStep(p, Vector3.new(p.X + d.X * advance, p.Y, p.Z + d.Z * advance))
+		if probe then
+			return true
+		end
+		-- боковой шаг вдоль препятствия
+		local newPos = self:_adjustStep(p, p + left * side * stepSize)
+		if not newPos then
+			-- в тупике сбоку — разворачиваем обход на другую сторону
+			side = -side
+			newPos = self:_adjustStep(p, p + left * side * stepSize)
+			if not newPos then
+				return false, "walled from both sides"
+			end
+		end
+		-- анти-зацикливание: повторное попадание в клетку — меняем сторону
+		local key = math.round(newPos.X / 4) * 100000 + math.round(newPos.Z / 4)
+		visited[key] = (visited[key] or 0) + 1
+		if visited[key] > 2 then
+			side = -side
+		end
+		if not setHrpCFrame(CFrame.new(newPos) * CFrame.Angles(0, startYaw, 0)) then
+			return false, "HumanoidRootPart lost during movement"
+		end
+		detour = detour + stepSize
+		task.wait(waitTime)
+	end
+	return false, "detour budget exceeded"
+end
+
 function CommandEngine:_moveTo(payload)
 	local ok, x, z, speed = self:_validateMoveTo(payload)
 	if not ok then
@@ -1035,6 +1109,10 @@ function CommandEngine:_moveTo(payload)
 		}
 	end
 
+	-- Адаптивное шагание к цели: каждый шаг считается от текущей позиции.
+	-- При свободном пути эквивалентно прямой линии; при блоке — тангенциальный
+	-- обход (_avoidAround) до восстановления прямого прохода. Контроль
+	-- прогресса (зацикливание) и общий дедлайн.
 	-- Те же параметры, что и в _moveAxis: 8 студий за шаг, пауза 0.25 с.
 	-- speed=10 = 32 ст/с — максимум проверенный чистым (лимит античита
 	-- ~32-45 ст/с, см. _moveAxis), не выше.
@@ -1042,45 +1120,62 @@ function CommandEngine:_moveTo(payload)
 	local baseWait = 0.25
 	local stepSize = baseStep * (speed / 10)
 	local waitTime = baseWait
-	local steps = math.max(1, math.floor(dist / stepSize))
-	local stepX = dx / steps
-	local stepZ = dz / steps
-
+	local deadline = tick() + (dist / 32) * 4 + 180
+	local bestRemaining = dist
+	local noProgress = 0
 	local blockedReason = nil
-	for i = 1, steps do
+
+	while tick() < deadline do
 		if self:_isCancelled() then
 			return { success = false, error = "cancelled" }
 		end
-
-		local newX = startX + stepX * i
-		local newZ = startZ + stepZ * i
-		local newPos = Vector3.new(newX, pos.Y, newZ)
-		local adjusted, reason = self:_adjustStep(hrp.Position, newPos)
-		if not adjusted then
-			blockedReason = reason
+		local p = hrp.Position
+		local rx, rz = x - p.X, z - p.Z
+		local remaining = math.sqrt(rx * rx + rz * rz)
+		if remaining < 0.5 then
 			break
 		end
-		newPos = adjusted
-		if not setHrpCFrame(CFrame.new(newPos) * CFrame.Angles(0, startYaw, 0)) then
-			return { success = false, error = "HumanoidRootPart lost during movement" }
+		if remaining < bestRemaining - 1.5 then
+			bestRemaining = remaining
+			noProgress = 0
+		else
+			noProgress = noProgress + 1
+			if noProgress > 80 then
+				blockedReason = "avoid loop: no progress to target"
+				break
+			end
 		end
-		task.wait(waitTime)
+		local dir = Vector3.new(rx / remaining, 0, rz / remaining)
+		local advance = math.min(stepSize, remaining)
+		local stepTarget = Vector3.new(p.X + dir.X * advance, p.Y, p.Z + dir.Z * advance)
+		local adjusted, reason = self:_adjustStep(p, stepTarget)
+		if adjusted then
+			if not setHrpCFrame(CFrame.new(adjusted) * CFrame.Angles(0, startYaw, 0)) then
+				return { success = false, error = "HumanoidRootPart lost during movement" }
+			end
+			task.wait(waitTime)
+		else
+			local okAvoid, avoidErr = self:_avoidAround(hrp, Vector3.new(x, p.Y, z), stepSize, waitTime, setHrpCFrame, startYaw)
+			if not okAvoid then
+				blockedReason = tostring(reason) .. " (avoid: " .. tostring(avoidErr) .. ")"
+				break
+			end
+		end
 	end
 
 	if self:_isCancelled() then
 		return { success = false, error = "cancelled" }
 	end
+	if not blockedReason and tick() >= deadline then
+		blockedReason = "timeout: deadline exceeded"
+	end
 
-	local finalTarget = Vector3.new(x, pos.Y, z)
 	if not blockedReason then
-		local adjusted, reason = self:_adjustStep(hrp.Position, finalTarget)
+		local finalTarget = Vector3.new(x, hrp.Position.Y, z)
+		local adjusted = self:_adjustStep(hrp.Position, finalTarget)
 		if adjusted then
 			finalTarget = adjusted
-		else
-			blockedReason = reason
 		end
-	end
-	if not blockedReason then
 		if not setHrpCFrame(CFrame.new(finalTarget) * CFrame.Angles(0, startYaw, 0)) then
 			return { success = false, error = "HumanoidRootPart lost during movement" }
 		end
