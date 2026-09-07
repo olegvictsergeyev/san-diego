@@ -2843,7 +2843,19 @@ function CommandEngine:_joinPrivateServer(payload)
 	if typeof(code) ~= "string" or code:gsub("%s+", "") == "" then
 		return { success = false, error = "param 'code' must be a non-empty string" }
 	end
+	-- Если InvokeServer упадёт/отклонит join ПОСЛЕ того, как агент уже
+	-- персистнул результат "completed", Agent перезапишет его ошибкой.
+	self._lastJoinCommandId = self.currentCommandId
 	return self.privateServer:joinByCode(code)
+end
+
+function CommandEngine:onTeleportFailed(err)
+	local commandId = self._lastJoinCommandId
+	if commandId and typeof(self.onJoinTeleportFailed) == "function" then
+		pcall(function()
+			self.onJoinTeleportFailed(commandId, err)
+		end)
+	end
 end
 
 function CommandEngine:_parseFormattedNumber(text)

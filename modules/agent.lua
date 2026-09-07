@@ -60,6 +60,7 @@ function Agent.new(config, httpClient, stateCollector, commandEngine, afk, resul
 		commandRetryDelay = config.commandRetryDelay or 3,
 		balancePath = config.balancePath or "leaderstats.Cash",
 		customData = config.customData or {},
+		postTeleportReadyDelay = tonumber(config.postTeleportReadyDelay) or 8,
 	}
 
 	self.http = httpClient
@@ -67,6 +68,21 @@ function Agent.new(config, httpClient, stateCollector, commandEngine, afk, resul
 	self.engine = commandEngine
 	self.afk = afk
 	self.resultStore = resultStore
+
+	-- Телепорт может не состояться уже ПОСЛЕ того, как join_private_server
+	-- отчитался "completed" (InvokeServer упал/отклонил позже). Перезаписываем
+	-- персистнутый результат ошибкой и доставляем его (флаг телепорта к этому
+	-- моменту уже снят, отправка пройдёт).
+	if commandEngine then
+		commandEngine.onJoinTeleportFailed = function(commandId, err)
+			local resultString = self:_resultToString({ success = false, error = "teleport failed: " .. tostring(err) })
+			if self.resultStore and commandId then
+				self.resultStore:save(commandId, resultString, "error")
+				self:_log("WARN", "join teleport failed after completion; result overwritten with error", commandId)
+				self:_sendPendingResults()
+			end
+		end
+	end
 
 	self.running = false
 	self.currentCommand = nil
@@ -259,6 +275,12 @@ function Agent:_sendPendingResults()
 	if not self.resultStore then
 		return
 	end
+	if getgenv().SanDiegoAgentTeleporting then
+		-- Во время телепорта результаты не шлём: результат join_private_server
+		-- доставит агент на новом сервере, когда клиент будет готов принимать
+		-- следующие команды.
+		return
+	end
 	local pending = self.resultStore:getPending()
 	if not pending or next(pending) == nil then
 		return
@@ -278,6 +300,11 @@ function Agent:_retryLoop()
 		task.wait(10)
 		if not self.running then
 			break
+		end
+		if getgenv().SanDiegoAgentTeleporting then
+			-- Пока идёт переход на другой сервер, отправку отложенных
+			-- результатов тоже приостанавливаем.
+			continue
 		end
 		local ok, err = pcall(function()
 			self:_sendPendingResults()
@@ -422,6 +449,15 @@ function Agent:_handleCommand(command)
 
 	commandFinished = true
 
+	-- Телепорт мог не состояться (InvokeServer упал или сервер отклонил
+	-- join). Тогда флаг уже снят, а причина — в SanDiegoAgentTeleportFailed:
+	-- отчитываемся ошибкой вместо "completed".
+	if command.name == "join_private_server" and getgenv().SanDiegoAgentTeleportFailed then
+		ok = false
+		result = { success = false, error = "teleport failed: " .. tostring(getgenv().SanDiegoAgentTeleportFailed) }
+		getgenv().SanDiegoAgentTeleportFailed = nil
+	end
+
 	local status = "completed"
 	if not ok then
 		result = { success = false, error = tostring(result) }
@@ -459,7 +495,11 @@ function Agent:_handleCommand(command)
 	if self.resultStore then
 		local stillPending = self.resultStore:getPending()[tostring(command.id)] ~= nil
 		if stillPending then
-			self:_log("WARN", "command finished but result not delivered; queued for retry", command.id, command.name)
+			if command.name == "join_private_server" and getgenv().SanDiegoAgentTeleporting then
+				self:_log("INFO", "join_private_server result deferred to post-teleport delivery", command.id)
+			else
+				self:_log("WARN", "command finished but result not delivered; queued for retry", command.id, command.name)
+			end
 		end
 	end
 
@@ -496,6 +536,13 @@ end
 
 function Agent:_fetcherLoop()
 	while self.running do
+		if getgenv().SanDiegoAgentTeleporting then
+			-- Идёт переход на другой сервер: новые команды не забираем,
+			-- чтобы они не выполнились на старом сервере. Они остаются на
+			-- бэкенде и будут приняты в работу агентом уже на новом сервере.
+			task.wait(0.5)
+			continue
+		end
 		-- Пока выполняется обычная команда, новые команды могут быть важны (например, cancel),
 		-- но мы не плодим очередь. Long poll продолжается, cancel обрабатывается сразу.
 		local ok, command = pcall(function()
@@ -519,6 +566,12 @@ end
 
 function Agent:_workerLoop()
 	while self.running do
+		if getgenv().SanDiegoAgentTeleporting then
+			-- Переход на другой сервер: из очереди не достаём, команда
+			-- должна выполниться уже на новом сервере.
+			task.wait(0.1)
+			continue
+		end
 		if #self.commandQueue > 0 then
 			local command = table.remove(self.commandQueue, 1)
 			local ok, err = pcall(function()
@@ -571,7 +624,31 @@ function Agent:start()
 	-- Сбрасываем возможный disconnect из прошлой сессии.
 	self:clearError()
 
-	-- Пытаемся доставить результаты, оставшиеся с прошлого запуска.
+	-- Ожидание готовности после телепорта. Флаг SanDiegoAgentTeleporting
+	-- переживает телепорт через genv: пока он стоит, клиент догружает новый
+	-- сервер. Ждём персонажа и фиксированную паузу, затем снимаем флаг,
+	-- доставляем результат join_private_server и только после этого fetcher
+	-- начнёт забирать новые команды — они будут приняты в работу уже на
+	-- новом сервере.
+	if getgenv().SanDiegoAgentTeleporting then
+		self:_log("INFO", "teleport flag detected, waiting for client readiness")
+		local Players = game:GetService("Players")
+		local timeoutAt = tick() + 30
+		while tick() < timeoutAt do
+			local char = Players.LocalPlayer and Players.LocalPlayer.Character
+			if char and char:FindFirstChild("HumanoidRootPart") then
+				break
+			end
+			task.wait(0.5)
+		end
+		task.wait(self.config.postTeleportReadyDelay or 8)
+		getgenv().SanDiegoAgentTeleporting = nil
+		getgenv().SanDiegoAgentTeleportFailed = nil
+		self:_log("INFO", "client ready after teleport, resuming command processing")
+	end
+
+	-- Пытаемся доставить результаты, оставшиеся с прошлого запуска
+	-- (в т.ч. результат join_private_server после телепорта).
 	pcall(function()
 		self:_sendPendingResults()
 	end)

@@ -16,6 +16,16 @@ function PrivateServer:setCommandEngine(commandEngine)
 	self.commandEngine = commandEngine
 end
 
+-- Ошибка доводится до CommandEngine/Agent: результат join_private_server
+-- может быть уже персистнут как "completed", его нужно перезаписать ошибкой.
+function PrivateServer:_notifyTeleportFailed(err)
+	if self.commandEngine and typeof(self.commandEngine.onTeleportFailed) == "function" then
+		pcall(function()
+			self.commandEngine:onTeleportFailed(err)
+		end)
+	end
+end
+
 function PrivateServer:_getRemotesFolder()
     local remotes = ReplicatedStorage:FindFirstChild("__remotes")
     if not remotes then
@@ -72,40 +82,68 @@ function PrivateServer:joinByCode(code)
         return { success = false, error = checkResult.Message or "server rejected join by code" }
     end
 
-    local joinRemote, joinErr = self:_getRemote("JoinServerByCode")
-    if not joinRemote then
-        return { success = false, error = joinErr }
-    end
+	local joinRemote, joinErr = self:_getRemote("JoinServerByCode")
+	if not joinRemote then
+		return { success = false, error = joinErr }
+	end
 
-    -- Запускаем в отдельном потоке, потому что успешный телепорт
-    -- может прервать выполнение текущего скрипта. Перезапуск агента на
-    -- новом сервере обеспечивает сам загрузчик (self-arm queue_on_teleport).
-    task.spawn(function()
-        -- Отключаем захват камеры перед телепортом, чтобы избежать вылетов.
-        if self.commandEngine and typeof(self.commandEngine.releaseCamera) == "function" then
-            pcall(function()
-                self.commandEngine:releaseCamera()
-            end)
-        end
-        local joinOk, joinResult = pcall(function()
-            return joinRemote:InvokeServer(code)
-        end)
-        if not joinOk then
-            warn("[SanDiegoAgent][PrivateServer] JoinServerByCode failed:", tostring(joinResult))
-        elseif typeof(joinResult) == "table" and joinResult.Success == false then
-            warn("[SanDiegoAgent][PrivateServer] JoinServerByCode rejected:", tostring(joinResult.Message))
-        else
-            print("[SanDiegoAgent][PrivateServer] JoinServerByCode invoked, teleport should start")
-        end
-    end)
+	-- Флаг телепорта ставится ДО вызова remote: старый агент на текущем
+	-- сервере перестаёт забирать новые команды и слать результаты, чтобы
+	-- бэкендная команда не выполнилась на старом сервере, пока идёт
+	-- переход. Результат join_private_server доставляет агент, стартовавший
+	-- УЖЕ на новом сервере (result_store переживает телепорт через файл).
+	getgenv().SanDiegoAgentTeleporting = true
+	getgenv().SanDiegoAgentTeleportFailed = nil
+	getgenv().SanDiegoAgentTeleportJobId = tostring(game.JobId or "")
 
-    return {
-        success = true,
-        data = {
-            code = code,
-            action = "teleport_requested",
-        },
-    }
+	-- Сторож: если через 90 секунд мы всё ещё на том же JobId, телепорт так
+	-- и не начался — снимаем флаг, чтобы агент не завис навсегда.
+	local watchedJobId = tostring(game.JobId or "")
+	task.delay(90, function()
+		if getgenv().SanDiegoAgentTeleporting
+			and getgenv().SanDiegoAgentTeleportJobId == watchedJobId
+			and tostring(game.JobId or "") == watchedJobId then
+			warn("[SanDiegoAgent][PrivateServer] teleport did not start within 90s, releasing teleport flag")
+			getgenv().SanDiegoAgentTeleporting = nil
+			getgenv().SanDiegoAgentTeleportFailed = "teleport did not start within 90s"
+		end
+	end)
+
+	-- Запускаем в отдельном потоке, потому что успешный телепорт
+	-- может прервать выполнение текущего скрипта. Перезапуск агента на
+	-- новом сервере обеспечивает сам загрузчик (self-arm queue_on_teleport).
+	task.spawn(function()
+		-- Отключаем захват камеры перед телепортом, чтобы избежать вылетов.
+		if self.commandEngine and typeof(self.commandEngine.releaseCamera) == "function" then
+			pcall(function()
+				self.commandEngine:releaseCamera()
+			end)
+		end
+		local joinOk, joinResult = pcall(function()
+			return joinRemote:InvokeServer(code)
+		end)
+		if not joinOk then
+			warn("[SanDiegoAgent][PrivateServer] JoinServerByCode failed:", tostring(joinResult))
+			getgenv().SanDiegoAgentTeleporting = nil
+			getgenv().SanDiegoAgentTeleportFailed = tostring(joinResult)
+			self:_notifyTeleportFailed(tostring(joinResult))
+		elseif typeof(joinResult) == "table" and joinResult.Success == false then
+			warn("[SanDiegoAgent][PrivateServer] JoinServerByCode rejected:", tostring(joinResult.Message))
+			getgenv().SanDiegoAgentTeleporting = nil
+			getgenv().SanDiegoAgentTeleportFailed = tostring(joinResult.Message or "join rejected")
+			self:_notifyTeleportFailed(tostring(joinResult.Message or "join rejected"))
+		else
+			print("[SanDiegoAgent][PrivateServer] JoinServerByCode invoked, teleport should start")
+		end
+	end)
+
+	return {
+		success = true,
+		data = {
+			code = code,
+			action = "teleport_requested",
+		},
+	}
 end
 
 return PrivateServer
