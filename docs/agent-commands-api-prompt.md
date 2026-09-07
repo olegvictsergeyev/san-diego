@@ -163,6 +163,14 @@ POST /commands/{id}/status
       }
     },
     {
+      "name": "open_door",
+      "params": {}
+    },
+    {
+      "name": "close_door",
+      "params": {}
+    },
+    {
       "name": "transfer_money_via_respawn",
       "params": {
         "identifier": { "type": "string", "min": 1, "max": 64 },

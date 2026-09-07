@@ -319,6 +319,16 @@ function CommandEngine:getCommandsSpec()
 			},
 		},
 		{
+			name = "open_door",
+			description = "Открыть дверь номера: тот же серверный вызов, что кнопка Open Door (без нажатия E). Если дверь уже открыта — ничего не делает, возвращает успех с open=true. Ближайшая доступная дверь (своя парадная или любая Interior, до 20 ст)",
+			params = {},
+		},
+		{
+			name = "close_door",
+			description = "Закрыть дверь номера: тот же серверный вызов, что кнопка Close Door (без нажатия E). Если дверь уже закрыта — ничего не делает, возвращает успех с open=false. Ближайшая доступная дверь (своя парадная или любая Interior, до 20 ст)",
+			params = {},
+		},
+		{
 			name = "transfer_money_via_respawn",
 			description = "Передавать деньги целевому игроку через respawn, пока его баланс не достигнет заданной суммы",
 			params = {
@@ -2731,6 +2741,29 @@ function CommandEngine:_rentApartmentCommand(payload)
 	return res
 end
 
+function CommandEngine:_doorCommand(targetOpen)
+	if not self.apartments then
+		return { success = false, error = "apartments module unavailable" }
+	end
+	local ok, res = pcall(function()
+		return self.apartments:setDoorOpen(targetOpen, function()
+			return self:_isCancelled()
+		end)
+	end)
+	if not ok then
+		return { success = false, error = tostring(res) }
+	end
+	return res
+end
+
+function CommandEngine:_openDoorCommand()
+	return self:_doorCommand(true)
+end
+
+function CommandEngine:_closeDoorCommand()
+	return self:_doorCommand(false)
+end
+
 function CommandEngine:_joinPrivateServer(payload)
 	local code = payload and payload.code
 	if typeof(code) ~= "string" or code:gsub("%s+", "") == "" then
@@ -3147,6 +3180,10 @@ function CommandEngine:execute(command)
 		result = self:_spawnVehicleCommand(payload)
 	elseif name == "rent_apartment" then
 		result = self:_rentApartmentCommand(payload)
+	elseif name == "open_door" then
+		result = self:_openDoorCommand()
+	elseif name == "close_door" then
+		result = self:_closeDoorCommand()
 	elseif name == "jump" then
 		result = self:_jumpCommand()
 	elseif name == "hold_key" then

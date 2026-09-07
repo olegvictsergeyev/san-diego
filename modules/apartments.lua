@@ -15,6 +15,9 @@ Apartments.__index = Apartments
 Apartments.DOOR_TAG = "ApartmentDoor"
 Apartments.DOOR_KIND_ATTR = "ApartmentDoorKind"
 Apartments.DOOR_KIND_FRONT = "Front"
+Apartments.DOOR_KIND_INTERIOR = "Interior"
+Apartments.DOOR_OPEN_ATTR = "ApartmentDoorOpen"
+Apartments.DOOR_BUSY_ATTR = "ApartmentDoorBusy"
 Apartments.OWNER_ATTR = "ApartmentOwnerUserId"
 Apartments.APARTMENT_ID_ATTR = "ApartmentId"
 Apartments.PLAYER_APARTMENT_ATTR = "OwnedApartmentId"
@@ -189,6 +192,120 @@ function Apartments:rent(apartmentId, isCancelled)
 			purchase_result = tostring(callResult),
 		},
 	}
+end
+
+-- Ближайшая дверь, которую игрок имеет право открывать/закрывать:
+-- своя парадная (ApartmentOwnerUserId == UserId) или любая Interior
+-- (совпадает с клиентским GetPromptMode). Возвращает door, distance, error.
+function Apartments:findToggleableDoor(hrp)
+	local player = Players.LocalPlayer
+	local best, bestDist = nil, math.huge
+	for _, door in ipairs(self:_doors()) do
+		local allowed = door:GetAttribute(self.DOOR_KIND_ATTR) == self.DOOR_KIND_INTERIOR
+		if not allowed and player then
+			allowed = door:GetAttribute(self.OWNER_ATTR) == player.UserId
+		end
+		if allowed then
+			local okP, pos = pcall(function()
+				return door:GetPivot().Position
+			end)
+			if okP and pos then
+				local dist = (pos - hrp.Position).Magnitude
+				if dist < bestDist then
+					best, bestDist = door, dist
+				end
+			end
+		end
+	end
+	if not best then
+		return nil, nil, "no toggleable door found nearby (own front door or any interior door)"
+	end
+	return best, bestDist, nil
+end
+
+-- Открывает (targetOpen=true) или закрывает ближайшую доступную дверь тем
+-- же вызовом, что промпт Open/Close Door (без нажатия E):
+--   Client.ApartmentService:ToggleApartmentDoor(door)
+-- Доступные двери — своя парадная (ApartmentOwnerUserId == UserId) или
+-- любая Interior (как в клиентском GetPromptMode). Если дверь уже в
+-- целевом состоянии — вызов не делается, возвращается успех (no-op).
+-- Возвращает open — итоговое состояние двери.
+function Apartments:setDoorOpen(targetOpen, isCancelled)
+	local player = Players.LocalPlayer
+	if not player then
+		return { success = false, error = "local player not found" }
+	end
+	local character = player.Character
+	local hrp = character and character:FindFirstChild("HumanoidRootPart")
+	if not hrp then
+		return { success = false, error = "HumanoidRootPart not found" }
+	end
+
+	local client, clientErr = self:_client()
+	if not client then
+		return { success = false, error = clientErr }
+	end
+
+	local door, dist, findErr = self:findToggleableDoor(hrp)
+	if not door then
+		return { success = false, error = findErr }
+	end
+
+	local data = {
+		apartment_id = door:GetAttribute(self.APARTMENT_ID_ATTR),
+		door_kind = door:GetAttribute(self.DOOR_KIND_ATTR),
+		door_distance = math.floor(dist * 10) / 10,
+	}
+
+	if dist > self.MAX_DOOR_DISTANCE then
+		data.open = door:GetAttribute(self.DOOR_OPEN_ATTR) == true
+		return { success = false, error = string.format("door is %.1f studs away (max %d)", dist, self.MAX_DOOR_DISTANCE), data = data }
+	end
+
+	local function doorOpen()
+		return door:GetAttribute(self.DOOR_OPEN_ATTR) == true
+	end
+
+	-- уже в целевом состоянии — успех без вызова
+	if doorOpen() == targetOpen then
+		data.open = targetOpen
+		data.toggled = false
+		return { success = true, data = data }
+	end
+
+	-- ждём, пока дверь освободится (анимация предыдущего переключения)
+	local busyDeadline = tick() + 4
+	while door:GetAttribute(self.DOOR_BUSY_ATTR) == true and tick() < busyDeadline do
+		if isCancelled and isCancelled() then
+			return { success = false, error = "cancelled", data = data }
+		end
+		task.wait(0.1)
+	end
+
+	local okCall, callErr = pcall(function()
+		client.ApartmentService:ToggleApartmentDoor(door)
+	end)
+	if not okCall then
+		data.open = doorOpen()
+		return { success = false, error = "toggle call failed: " .. tostring(callErr), data = data }
+	end
+
+	-- верификация: атрибут должен дойти до целевого состояния
+	local deadline = tick() + 4
+	while tick() < deadline do
+		if isCancelled and isCancelled() then
+			return { success = false, error = "cancelled", data = data }
+		end
+		if doorOpen() == targetOpen then
+			data.open = targetOpen
+			data.toggled = true
+			return { success = true, data = data }
+		end
+		task.wait(0.1)
+	end
+
+	data.open = doorOpen()
+	return { success = false, error = "door did not reach target state (server rejected?)", data = data }
 end
 
 return Apartments
