@@ -20,10 +20,14 @@ local BASE_URL = getgenv().SanDiegoAgentBaseUrl or "https://raw.githubuserconten
 -- до 12 попыток) и проверяет, что агент реально стартовал
 -- (getgenv().SanDiegoAgentLastStartJobId). Без фильтра JobId каждый запуск
 -- лоадера ставил бы ещё одну копию в очередь, и при телепорте исполнились
--- бы все разом (буря рестартов). Сценарий «уже на новом сервере, агент ещё
--- не стартовал» покрывает autoexec/ручной запуск. Первая же исполнившаяся
--- копия «захватывает» JobId (SanDiegoAgentTeleportHandledJobId), так что при
--- бурсте из очереди работает ровно одна копия.
+-- бы все разом (буря рестартов). Постановка в очередь дедуплицируется
+-- через SanDiegoAgentTeleportQueuedJobId (только первая копия в «окне»
+-- загрузки агента), а первый стартующий лоадер помечается
+-- SanDiegoAgentStartingJobId, чтобы остальные копии выходили сразу, не
+-- грузя модули повторно. Первая исполнившаяся очередная копия «захватывает»
+-- JobId через SanDiegoAgentTeleportHandledJobId — при бурсте работает ровно
+-- одна. Сценарий «уже на новом сервере, агент ещё не стартовал» покрывает
+-- autoexec/ручной запуск.
 do
 	-- ПЕРЕЖИВАЕМ ТЕЛЕПОРТ: ставим в очередь перезапуск ТОЛЬКО при смене
 	-- JobId. Сценарий «уже на новом сервере, агент ещё не стартовал»
@@ -67,15 +71,19 @@ do
 	local q = queue_on_teleport
 	-- Ставим в очередь только при реальной смене сервера: перезапуск
 	-- лоадера на том же JobId не должен плодить копии в очереди.
-	if typeof(q) == "function" and getgenv().SanDiegoAgentLastStartJobId ~= currentJobId then
+	-- Дедуп через SanDiegoAgentTeleportQueuedJobId: при бурсте очередных
+	-- копий в «окне» загрузки агента очередь пополняет только первая
+	-- (проверка+запись без приостановок — атомарны в Luau).
+	if typeof(q) == "function"
+		and getgenv().SanDiegoAgentLastStartJobId ~= currentJobId
+		and getgenv().SanDiegoAgentTeleportQueuedJobId ~= currentJobId then
+		getgenv().SanDiegoAgentTeleportQueuedJobId = currentJobId
 		local ok = pcall(q, reloadCode)
 		print("[SanDiegoAgent] queue_on_teleport armed:", tostring(ok))
+	elseif typeof(q) ~= "function" then
+		warn("[SanDiegoAgent] queue_on_teleport unavailable; relying on autoexec")
 	else
-		if typeof(q) ~= "function" then
-			warn("[SanDiegoAgent] queue_on_teleport unavailable; relying on autoexec")
-		else
-			print("[SanDiegoAgent] queue_on_teleport skipped: already on this server")
-		end
+		print("[SanDiegoAgent] queue_on_teleport skipped: already on this server")
 	end
 end
 
@@ -105,6 +113,13 @@ if getgenv().SanDiegoAgentRunning and getgenv().SanDiegoAgentRunningJobId == cur
     return
 end
 
+-- Первый лоадер на новом сервере уже занял слот старта и грузит модули:
+-- пропускаем остальные копии, не дожидаясь Instance-метки.
+if getgenv().SanDiegoAgentStartingJobId == currentJobId then
+    print("[SanDiegoAgent] skipping start: another loader is starting the agent")
+    return
+end
+
 if existingMarker then
     print("[SanDiegoAgent] skipping start: running marker found")
     return
@@ -112,6 +127,13 @@ end
 
 getgenv().SanDiegoAgentRunning = true
 getgenv().SanDiegoAgentRunningJobId = currentJobId
+-- Метка ставится ДО длительной загрузки модулей: это единственный защитный
+-- барьер от бурста queue_on_teleport (все копии кроме первой видят метку и
+-- выходят). JobId «последнего старта» намеренно НЕ выставляем здесь —
+-- иначе очередные копии решили бы, что сервер тот же, и не стартовали бы
+-- агент на новом сервере (агент реально стартует асинхронно в UIPanel.run,
+-- и сигнал LastStartJobId выставляется ниже, после возврата из run()).
+getgenv().SanDiegoAgentStartingJobId = currentJobId
 
 local marker = Instance.new("BoolValue")
 marker.Name = "SanDiegoAgentRunningMarker"
@@ -144,6 +166,7 @@ if not ok then
     warn("[SanDiegoAgent] failed to start: " .. tostring(result))
     getgenv().SanDiegoAgentRunning = nil
     getgenv().SanDiegoAgentRunningJobId = nil
+    getgenv().SanDiegoAgentStartingJobId = nil
     if marker then
         pcall(function() marker:Destroy() end)
     end
