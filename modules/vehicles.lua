@@ -346,10 +346,14 @@ end
 -- DEFAULT_LANE_Z — главный проспект). isCancelled — кооперативная отмена.
 -- speedLevel — ограничение скорости по шкале 0..10 (линейно 0..DRIVE_VMAX;
 -- 10 или nil = полная скорость; 0 = не уезжать, только встать в полосу).
-function Vehicles:drive(dx, laneZ, isCancelled, speedLevel)
+-- jumpOff — без торможения: по достижении цели персонаж спрыгивает с
+-- транспорта (humanoid.Sit = false), техника с сохранением скорости
+-- катится дальше сама; констрейнты снимаются, импульс не обнуляется.
+function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff)
 	dx = tonumber(dx) or 0
 	laneZ = tonumber(laneZ) or self.DEFAULT_LANE_Z
 	speedLevel = tonumber(speedLevel) or 10
+	jumpOff = jumpOff == true
 	if dx % 1 ~= 0 or math.abs(dx) > self.MAX_DRIVE_DIST then
 		return { success = false, error = "x must be an integer in [-" .. self.MAX_DRIVE_DIST .. ", " .. self.MAX_DRIVE_DIST .. "]" }
 	end
@@ -458,6 +462,7 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel)
 	local vmax, t300 = 0, nil
 	local stuckAt, stuckDist = tick(), math.huge
 	local abortReason, brakeStartX = nil, nil
+	local jumped, jumpSpeed = false, 0
 	local timeout = math.max(math.abs(dx) / 200 + 40, math.abs(dx) / math.max(targetVmax, 30) * 1.5 + 40)
 	while tick() - t0 < timeout and s.root.Parent do
 		if isCancelled and isCancelled() then
@@ -505,7 +510,15 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel)
 			if not t300 and v >= 300 then
 				t300 = tick() - t0
 			end
-			if dir * (targetX - p.X) <= (v * v) / (2 * BRAKE_REAL) then
+			if jumpOff then
+				-- без торможения: цель достигнута (или будет достигнута
+				-- на следующих тиках) — спрыгиваем, техника катится сама
+				if dir * (targetX - p.X) <= math.max(v * self.DT * 1.5, 3) then
+					jumped = true
+					jumpSpeed = s.root.AssemblyLinearVelocity.Magnitude
+					break
+				end
+			elseif dir * (targetX - p.X) <= (v * v) / (2 * BRAKE_REAL) then
 				phase = "brake"
 				brakeStartX = p.X
 			end
@@ -545,6 +558,35 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel)
 			end
 		end
 		task.wait(self.DT)
+	end
+	-- ПРЫЖОК (jump_off): спрыгиваем у цели, технику не тормозим —
+	-- снимаем персонажа с сиденья и убираем констрейнты, импульс
+	-- сохраняется, техника катится дальше сама.
+	if jumped then
+		local pEnd = s.root.Position
+		local travelled = math.abs(pEnd.X - startX)
+		pcall(function()
+			local player = Players.LocalPlayer
+			local hum = player and player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+			if hum then
+				hum.Sit = false
+			end
+		end)
+		self:_teardown()
+		local data = {
+			travelled = math.floor(travelled),
+			vmax = math.floor(vmax),
+			target_vmax = targetVmax,
+			brake_dist = -1,
+			lane_z = laneZ,
+			time = math.floor((tick() - t0) * 10) / 10,
+			jumped = true,
+			jump_speed = math.floor(jumpSpeed),
+		}
+		if t300 then
+			data.t_300 = math.floor(t300 * 10) / 10
+		end
+		return { success = true, data = data }
 	end
 	-- АКТИВНАЯ ОСТАНОВКА: техника сохраняет импульс — держим ноль,
 	-- пока реальная скорость не упадёт (иначе укатится сама)

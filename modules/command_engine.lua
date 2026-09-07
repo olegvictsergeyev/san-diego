@@ -530,6 +530,11 @@ function CommandEngine:getCommandsSpec()
 					max = 10,
 					description = "Ограничение скорости по шкале 0..10: линейно 0..580 ст/с (10 или отсутствует = полная; 0 = не уезжать, только встать в полосу)",
 				},
+				jump_off = {
+					type = "boolean",
+					required = false,
+					description = "true = не тормозить у цели: по достижении цели спрыгнуть с транспорта, техника с сохранением скорости катится дальше сама (по умолчанию false — обычная остановка у цели)",
+				},
 			},
 		},
 		{
@@ -1969,10 +1974,14 @@ function CommandEngine:_driveCommand(payload)
 	if speed ~= nil and (typeof(speed) ~= "number" or speed % 1 ~= 0 or speed < 0 or speed > 10) then
 		return { success = false, error = "speed must be an integer in [0, 10]" }
 	end
+	local jumpOff = payload.jump_off
+	if jumpOff ~= nil and typeof(jumpOff) ~= "boolean" then
+		return { success = false, error = "jump_off must be a boolean" }
+	end
 	local ok, res = pcall(function()
 		return self.vehicles:drive(x, z, function()
 			return self:_isCancelled()
-		end, speed)
+		end, speed, jumpOff)
 	end)
 	if not ok then
 		return { success = false, error = tostring(res) }
