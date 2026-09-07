@@ -9,7 +9,7 @@
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-	version = "2.10.0",
+	version = "2.10.1",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -270,7 +270,7 @@ local function buildVersionBadge()
     frame.Size = UDim2.new(0, 110, 0, 44)
     frame.Position = UDim2.new(0, 12, 1, -56)
     frame.AnchorPoint = Vector2.new(0, 1)
-    frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    frame.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
     frame.BackgroundTransparency = 0.2
     frame.BorderSizePixel = 0
     frame.Parent = screenGui
