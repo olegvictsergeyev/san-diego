@@ -215,7 +215,8 @@ POST /commands/{id}/status
       "name": "drive",
       "params": {
         "x": { "type": "integer", "min": -20000, "max": 20000 },
-        "z": { "type": "number", "min": -20000, "max": 20000 }
+        "z": { "type": "number", "min": -20000, "max": 20000 },
+        "speed": { "type": "integer", "min": 0, "max": 10 }
       }
     },
     {

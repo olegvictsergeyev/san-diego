@@ -344,14 +344,25 @@ end
 -- dx — смещение по X со знаком (0 = не ехать, только встать в полосу),
 -- laneZ — абсолютная целевая координата полосы (по умолчанию
 -- DEFAULT_LANE_Z — главный проспект). isCancelled — кооперативная отмена.
-function Vehicles:drive(dx, laneZ, isCancelled)
+-- speedLevel — ограничение скорости по шкале 0..10 (линейно 0..DRIVE_VMAX;
+-- 10 или nil = полная скорость; 0 = не уезжать, только встать в полосу).
+function Vehicles:drive(dx, laneZ, isCancelled, speedLevel)
 	dx = tonumber(dx) or 0
 	laneZ = tonumber(laneZ) or self.DEFAULT_LANE_Z
+	speedLevel = tonumber(speedLevel) or 10
 	if dx % 1 ~= 0 or math.abs(dx) > self.MAX_DRIVE_DIST then
 		return { success = false, error = "x must be an integer in [-" .. self.MAX_DRIVE_DIST .. ", " .. self.MAX_DRIVE_DIST .. "]" }
 	end
 	if math.abs(laneZ) > 20000 then
 		return { success = false, error = "z must be in [-20000, 20000]" }
+	end
+	if speedLevel < 0 or speedLevel > 10 or speedLevel % 1 ~= 0 then
+		return { success = false, error = "speed must be an integer in [0, 10]" }
+	end
+	-- потолок скорости по шкале; 0 = стоять в полосе (как dx = 0)
+	local targetVmax = math.floor(self.DRIVE_VMAX * speedLevel / 10)
+	if speedLevel == 0 then
+		dx = 0
 	end
 	local root, err, model = self:_car()
 	if not root then
@@ -439,7 +450,7 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 			s.bv.Velocity = Vector3.zero
 		end)
 		self:_teardown()
-		return { success = true, data = { aligned = true, lane_z = laneZ, position = math.floor(root.Position.X) } }
+		return { success = true, data = { aligned = true, lane_z = laneZ, position = math.floor(root.Position.X), target_vmax = targetVmax } }
 	end
 	-- ФАЗА 1: полный разгон + пробег + резкое торможение у цели
 	local ACCEL, BRAKE_CMD, BRAKE_REAL = 60, 80, 65
@@ -447,7 +458,7 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 	local vmax, t300 = 0, nil
 	local stuckAt, stuckDist = tick(), math.huge
 	local abortReason, brakeStartX = nil, nil
-	local timeout = math.abs(dx) / 200 + 40
+	local timeout = math.max(math.abs(dx) / 200 + 40, math.abs(dx) / math.max(targetVmax, 30) * 1.5 + 40)
 	while tick() - t0 < timeout and s.root.Parent do
 		if isCancelled and isCancelled() then
 			abortReason = "cancelled"
@@ -490,7 +501,7 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 			end
 		end
 		if phase == "accel" then
-			v = math.min(v + ACCEL * self.DT, self.DRIVE_VMAX)
+			v = math.min(v + ACCEL * self.DT, targetVmax)
 			if not t300 and v >= 300 then
 				t300 = tick() - t0
 			end
@@ -553,6 +564,7 @@ function Vehicles:drive(dx, laneZ, isCancelled)
 	local data = {
 		travelled = math.floor(travelled),
 		vmax = math.floor(vmax),
+		target_vmax = targetVmax,
 		brake_dist = math.floor(brakeDist),
 		lane_z = laneZ,
 		time = math.floor((tick() - t0) * 10) / 10,
