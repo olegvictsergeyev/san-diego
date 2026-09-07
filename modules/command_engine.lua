@@ -592,17 +592,17 @@ function CommandEngine:getCommandsSpec()
 					max = 360,
 					description = "Абсолютный угол в градусах",
 				},
-				speed = {
-					type = "integer",
-					required = false,
-					min = 1,
-					max = 10,
-					description = "Скорость поворота: 10 — быстро (по умолчанию), 1 — медленно",
-				},
+			speed = {
+				type = "integer",
+				required = false,
+				min = 0,
+				max = 10,
+				description = "Скорость поворота: 10 — быстро (по умолчанию), 1 — медленно, 0 — ничего не делать (ни персонаж, ни камера не поворачиваются)",
 			},
 		},
-		{
-			name = "tilt_camera",
+	},
+	{
+		name = "tilt_camera",
 			description = "Наклонить камеру по вертикали (без поворота персонажа)",
 			params = {
 				degrees = {
@@ -2050,12 +2050,24 @@ function CommandEngine:_smoothTurn(targetDegrees, withCamera, turnSpeed)
 		return { success = false, error = degrees }
 	end
 
-	self:releaseCamera()
-
 	turnSpeed = tonumber(turnSpeed) or 10
-	if type(turnSpeed) ~= "number" or turnSpeed % 1 ~= 0 or turnSpeed < 1 or turnSpeed > 10 then
-		return { success = false, error = "param 'speed' must be an integer in [1, 10]" }
+	if type(turnSpeed) ~= "number" or turnSpeed % 1 ~= 0 or turnSpeed < 0 or turnSpeed > 10 then
+		return { success = false, error = "param 'speed' must be an integer in [0, 10]" }
 	end
+
+	-- speed 0 = отсутствие поворота: ни персонаж, ни камера не меняются,
+	-- команда ничего не делает (успешный no-op)
+	if turnSpeed == 0 then
+		local hrp0 = self:_getHrp()
+		local yaw = nil
+		if hrp0 then
+			local _, y = hrp0.CFrame:ToEulerAnglesYXZ()
+			yaw = math.round(math.deg(self:_normalizeAngle(y)) * 10) / 10
+		end
+		return { success = true, data = { degrees = degrees, withCamera = withCamera, newYaw = yaw, noRotation = true } }
+	end
+
+	self:releaseCamera()
 
 	local hrp = self:_getHrp()
 	if not hrp then
