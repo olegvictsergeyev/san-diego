@@ -780,6 +780,39 @@ function CommandEngine:_validateMoveTo(payload)
 	return true, x, z, speed
 end
 
+-- Защита шаговых телепортов (move_x/z, move_to): не входить в стены
+-- и препятствия. Перед шагом луч вперёд на уровне пояса; при ударе —
+-- пробуем подъём: вершина ≤12 ст над текущим уровнем → переносим шаг на
+-- вершину, иначе шаг блокируется. После шага луч вниз прилипает к земле
+-- (склоны/холмы — подъём/спуск, а не провал внутрь геометрии).
+-- Возвращает скорректированную позицию или nil + причина.
+function CommandEngine:_adjustStep(currentPos, targetPos)
+	local char = self:_getCharacter()
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { char }
+	local flat = Vector3.new(targetPos.X - currentPos.X, 0, targetPos.Z - currentPos.Z)
+	local dist = flat.Magnitude
+	if dist > 0.01 then
+		local dir = flat.Unit
+		local hit = workspace:Raycast(currentPos + Vector3.new(0, -1, 0), dir * (dist + 2), params)
+		if hit then
+			local probe = workspace:Raycast(hit.Position + dir * 1.5 + Vector3.new(0, 25, 0), Vector3.new(0, -60, 0), params)
+			local topY = probe and probe.Position.Y
+			if topY and (topY - currentPos.Y) <= 12 then
+				targetPos = Vector3.new(targetPos.X, topY + 3.2, targetPos.Z)
+			else
+				return nil, "blocked: " .. hit.Instance.Name
+			end
+		end
+	end
+	local down = workspace:Raycast(targetPos + Vector3.new(0, 5, 0), Vector3.new(0, -60, 0), params)
+	if down then
+		targetPos = Vector3.new(targetPos.X, down.Position.Y + 3.2, targetPos.Z)
+	end
+	return targetPos
+end
+
 function CommandEngine:_moveAxis(axis, payload)
 	local ok, value, speed = self:_validateMove(payload, axis)
 	if not ok then
@@ -845,6 +878,7 @@ function CommandEngine:_moveAxis(axis, payload)
 		return false
 	end
 
+	local blockedReason = nil
 	for _ = 1, steps do
 		if self:_isCancelled() then
 			return { success = false, error = "cancelled" }
@@ -858,6 +892,14 @@ function CommandEngine:_moveAxis(axis, payload)
 			newPos = Vector3.new(pos.X, current, pos.Z)
 		else
 			newPos = Vector3.new(pos.X, pos.Y, current)
+		end
+		if axis ~= "y" then
+			local adjusted, reason = self:_adjustStep(hrp.Position, newPos)
+			if not adjusted then
+				blockedReason = reason
+				break
+			end
+			newPos = adjusted
 		end
 		if not setHrpCFrame(CFrame.new(newPos) * CFrame.Angles(0, startYaw, 0)) then
 			return { success = false, error = "HumanoidRootPart lost during movement" }
@@ -878,12 +920,20 @@ function CommandEngine:_moveAxis(axis, payload)
 	else
 		finalPos = Vector3.new(pos.X, pos.Y, finalValue)
 	end
+	if axis ~= "y" and not blockedReason then
+		local adjusted, reason = self:_adjustStep(hrp.Position, finalPos)
+		if adjusted then
+			finalPos = adjusted
+		else
+			blockedReason = reason
+		end
+	end
 	if not setHrpCFrame(CFrame.new(finalPos) * CFrame.Angles(0, startYaw, 0)) then
 		return { success = false, error = "HumanoidRootPart lost during movement" }
 	end
 
 	local finalHrp = self:_getHrp()
-	return {
+	local result = {
 		success = true,
 		data = {
 			newPosition = {
@@ -893,6 +943,12 @@ function CommandEngine:_moveAxis(axis, payload)
 			},
 		},
 	}
+	if blockedReason then
+		result.success = false
+		result.error = blockedReason
+		result.data.blocked = true
+	end
+	return result
 end
 
 function CommandEngine:_moveTo(payload)
@@ -968,6 +1024,7 @@ function CommandEngine:_moveTo(payload)
 	local stepX = dx / steps
 	local stepZ = dz / steps
 
+	local blockedReason = nil
 	for i = 1, steps do
 		if self:_isCancelled() then
 			return { success = false, error = "cancelled" }
@@ -976,6 +1033,12 @@ function CommandEngine:_moveTo(payload)
 		local newX = startX + stepX * i
 		local newZ = startZ + stepZ * i
 		local newPos = Vector3.new(newX, pos.Y, newZ)
+		local adjusted, reason = self:_adjustStep(hrp.Position, newPos)
+		if not adjusted then
+			blockedReason = reason
+			break
+		end
+		newPos = adjusted
 		if not setHrpCFrame(CFrame.new(newPos) * CFrame.Angles(0, startYaw, 0)) then
 			return { success = false, error = "HumanoidRootPart lost during movement" }
 		end
@@ -986,12 +1049,21 @@ function CommandEngine:_moveTo(payload)
 		return { success = false, error = "cancelled" }
 	end
 
-	if not setHrpCFrame(CFrame.new(Vector3.new(x, pos.Y, z)) * CFrame.Angles(0, startYaw, 0)) then
+	local finalTarget = Vector3.new(x, pos.Y, z)
+	if not blockedReason then
+		local adjusted, reason = self:_adjustStep(hrp.Position, finalTarget)
+		if adjusted then
+			finalTarget = adjusted
+		else
+			blockedReason = reason
+		end
+	end
+	if not setHrpCFrame(CFrame.new(finalTarget) * CFrame.Angles(0, startYaw, 0)) then
 		return { success = false, error = "HumanoidRootPart lost during movement" }
 	end
 
 	local finalHrp = self:_getHrp()
-	return {
+	local result = {
 		success = true,
 		data = {
 			newPosition = {
@@ -1001,6 +1073,12 @@ function CommandEngine:_moveTo(payload)
 			},
 		},
 	}
+	if blockedReason then
+		result.success = false
+		result.error = blockedReason
+		result.data.blocked = true
+	end
+	return result
 end
 
 function CommandEngine:_chasePlayer(player, options)
