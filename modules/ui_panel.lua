@@ -194,6 +194,7 @@ local function startAgent()
         currentAgent:stop()
         currentAgent = nil
         getgenv().SanDiegoAgentRunning = nil
+        getgenv().SanDiegoAgentStartingJobId = nil
     end
     currentAgent = makeAgent()
     warn("[SanDiegoAgent][UI] agent instance created")
@@ -217,6 +218,10 @@ local function stopAgent()
     end
     getgenv().SanDiegoAgentRunning = nil
     getgenv().SanDiegoAgentRunningJobId = nil
+    -- Слот «старт занят» тоже освобождаем: иначе после ручного рестарта
+    -- (стоп/старт) лоадер будет вечно видеть просроченный StartingJobId и
+    -- отказываться запускать агент.
+    getgenv().SanDiegoAgentStartingJobId = nil
     getgenv().StopSanDiegoAgent = false
     pcall(function()
         for _, root in ipairs({ game.CoreGui, Compat.gethui() }) do

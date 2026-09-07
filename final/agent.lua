@@ -114,8 +114,9 @@ if getgenv().SanDiegoAgentRunning and getgenv().SanDiegoAgentRunningJobId == cur
 end
 
 -- Первый лоадер на новом сервере уже занял слот старта и грузит модули:
--- пропускаем остальные копии, не дожидаясь Instance-метки.
-if getgenv().SanDiegoAgentStartingJobId == currentJobId then
+-- пропускаем остальные копии, не дожидаясь Instance-метки. Проверяем ещё и
+-- Running: после остановки агента слот StartingJobId мог остаться просроченным.
+if getgenv().SanDiegoAgentStartingJobId == currentJobId and getgenv().SanDiegoAgentRunning then
     print("[SanDiegoAgent] skipping start: another loader is starting the agent")
     return
 end
