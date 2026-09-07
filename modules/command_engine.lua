@@ -3,7 +3,7 @@ local Players = game:GetService("Players")
 local CommandEngine = {}
 CommandEngine.__index = CommandEngine
 
-function CommandEngine.new(privateServer, afk, state, printers, vehicles)
+function CommandEngine.new(privateServer, afk, state, printers, vehicles, apartments)
 	local self = setmetatable({}, CommandEngine)
 	self.cancelled = false
 	self.currentCommandId = nil
@@ -39,6 +39,16 @@ function CommandEngine.new(privateServer, afk, state, printers, vehicles)
 			self.vehicles = Vehicles.new()
 		end
 	end
+	if apartments then
+		self.apartments = apartments
+	else
+		local ok, Apartments = pcall(function()
+			return require(script.Parent:WaitForChild("apartments"))
+		end)
+		if ok and Apartments then
+			self.apartments = Apartments.new()
+		end
+	end
 	return self
 end
 
@@ -52,6 +62,10 @@ end
 
 function CommandEngine:setVehicles(vehicles)
 	self.vehicles = vehicles
+end
+
+function CommandEngine:setApartments(apartments)
+	self.apartments = apartments
 end
 
 function CommandEngine:setState(state)
@@ -288,6 +302,19 @@ function CommandEngine:getCommandsSpec()
 					min = 1,
 					max = 64,
 					description = "Имя техники как в списке спавнера (например ducati, C63DTM, 911)",
+				},
+			},
+		},
+		{
+			name = "rent_apartment",
+			description = "Арендовать номер отеля: тот же серверный вызов, что кнопка Purchase Apartment на двери (без нажатия E). Если номер уже арендован — покупка не выполняется, возвращается already_rented. Персонаж должен стоять у неарендованной парадной двери (ближайшей или указанной apartment_id, до 20 ст). Требует команды Civilian",
+			params = {
+				apartment_id = {
+					type = "integer",
+					required = false,
+					min = 1,
+					max = 10000,
+					description = "ApartmentId конкретного номера (по умолчанию — ближайшая свободная парадная дверь)",
 				},
 			},
 		},
@@ -2681,6 +2708,25 @@ function CommandEngine:_setTeamCommand(payload)
 	}
 end
 
+function CommandEngine:_rentApartmentCommand(payload)
+	if not self.apartments then
+		return { success = false, error = "apartments module unavailable" }
+	end
+	local apartmentId = payload and payload.apartment_id
+	if apartmentId ~= nil and (typeof(apartmentId) ~= "number" or apartmentId % 1 ~= 0 or apartmentId < 1 or apartmentId > 10000) then
+		return { success = false, error = "apartment_id must be an integer in [1, 10000]" }
+	end
+	local ok, res = pcall(function()
+		return self.apartments:rent(apartmentId, function()
+			return self:_isCancelled()
+		end)
+	end)
+	if not ok then
+		return { success = false, error = tostring(res) }
+	end
+	return res
+end
+
 function CommandEngine:_joinPrivateServer(payload)
 	local code = payload and payload.code
 	if typeof(code) ~= "string" or code:gsub("%s+", "") == "" then
@@ -3095,6 +3141,8 @@ function CommandEngine:execute(command)
 		result = self:_driveCommand(payload)
 	elseif name == "spawn_vehicle" then
 		result = self:_spawnVehicleCommand(payload)
+	elseif name == "rent_apartment" then
+		result = self:_rentApartmentCommand(payload)
 	elseif name == "jump" then
 		result = self:_jumpCommand()
 	elseif name == "hold_key" then
