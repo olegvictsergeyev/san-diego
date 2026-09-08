@@ -848,6 +848,25 @@ function CommandEngine:_validateMoveTo(payload)
 	return true, x, z, speed
 end
 
+-- Рейкаст, игнорирующий НЕколлидируемую геометрию (CanCollide=false).
+-- Декоративные меши зданий имеют CanQuery=true, поэтому обычный Raycast их
+-- видит и маскирует под стены: обходчик ходил вокруг фантомных препятствий
+-- и сгорал по бюджету ("avoid: detour budget exceeded"), хотя прямой проход
+-- свободен — физика персонажа эти меши проходит насквозь.
+-- Попавшиеся фантомные части добавляются в фильтр params (накопительно
+-- в рамках одного params), затем луч повторяется. Лимит 8 итераций.
+function CommandEngine:_raycastWalk(origin, direction, params)
+	for _ = 1, 8 do
+		local hit = workspace:Raycast(origin, direction, params)
+		if hit and hit.Instance and hit.Instance.CanCollide == false then
+			params:AddToFilter(hit.Instance)
+		else
+			return hit
+		end
+	end
+	return workspace:Raycast(origin, direction, params)
+end
+
 -- Защита шаговых телепортов (move_x/z, move_to): не входить в стены
 -- и препятствия. Перед шагом луч вперёд на уровне пояса; при ударе —
 -- пробуем подъём: вершина ≤12 ст над текущим уровнем → переносим шаг на
@@ -863,7 +882,7 @@ function CommandEngine:_adjustStep(currentPos, targetPos)
 	local dist = flat.Magnitude
 	if dist > 0.01 then
 		local dir = flat.Unit
-		local hit = workspace:Raycast(currentPos + Vector3.new(0, -1, 0), dir * (dist + 2), params)
+		local hit = self:_raycastWalk(currentPos + Vector3.new(0, -1, 0), dir * (dist + 2), params)
 		if hit then
 			-- Профиль препятствия: серия лучей вперёд нарастающей высоты.
 			-- Первая «чистая» высота — это высота препятствия. Нельзя искать
@@ -875,7 +894,7 @@ function CommandEngine:_adjustStep(currentPos, targetPos)
 			local clearance = nil
 			for _, h in ipairs(heights) do
 				local o = Vector3.new(currentPos.X, currentPos.Y + h, currentPos.Z)
-				local hhit = workspace:Raycast(o, dir * (dist + 2), params)
+				local hhit = self:_raycastWalk(o, dir * (dist + 2), params)
 				if not hhit then
 					clearance = h
 					break
@@ -889,13 +908,13 @@ function CommandEngine:_adjustStep(currentPos, targetPos)
 				-- тогда это проходимый барьер, а не стена. Приземляемся за ним
 				-- на уровне земли с проверкой габарита над головой. Толстые
 				-- стены/здания проходу не поддаются — честный обход выше.
-				local past = workspace:Raycast(hit.Position + dir * 0.3, dir * 2.5, params)
+				local past = self:_raycastWalk(hit.Position + dir * 0.3, dir * 2.5, params)
 				if not past then
 					local landing = currentPos + dir * (dist + 2)
-					local down = workspace:Raycast(landing + Vector3.new(0, 5, 0), Vector3.new(0, -60, 0), params)
+					local down = self:_raycastWalk(landing + Vector3.new(0, 5, 0), Vector3.new(0, -60, 0), params)
 					if down then
 						local landHrpY = down.Position.Y + 3.2
-						local head = workspace:Raycast(Vector3.new(landing.X, landHrpY - 0.5, landing.Z), Vector3.new(0, 5.5, 0), params)
+						local head = self:_raycastWalk(Vector3.new(landing.X, landHrpY - 0.5, landing.Z), Vector3.new(0, 5.5, 0), params)
 						if not head then
 							targetPos = Vector3.new(landing.X, landHrpY, landing.Z)
 						else
@@ -910,7 +929,7 @@ function CommandEngine:_adjustStep(currentPos, targetPos)
 			end
 		end
 	end
-	local down = workspace:Raycast(targetPos + Vector3.new(0, 5, 0), Vector3.new(0, -60, 0), params)
+	local down = self:_raycastWalk(targetPos + Vector3.new(0, 5, 0), Vector3.new(0, -60, 0), params)
 	if down then
 		targetPos = Vector3.new(targetPos.X, down.Position.Y + 3.2, targetPos.Z)
 	end
@@ -1102,7 +1121,7 @@ function CommandEngine:_avoidAround(hrp, targetPos, stepSize, waitTime, setHrpCF
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = { char }
 	local function sideClearance(sideVec)
-		local hit = workspace:Raycast(pos + Vector3.new(0, -1, 0), sideVec * 40, params)
+		local hit = self:_raycastWalk(pos + Vector3.new(0, -1, 0), sideVec * 40, params)
 		return hit and hit.Distance or 40
 	end
 	local side = sideClearance(left) >= sideClearance(left * -1) and 1 or -1
@@ -1829,14 +1848,14 @@ function CommandEngine:_isGrounded(hrp)
     local rp = RaycastParams.new()
     rp.FilterDescendantsInstances = { hrp.Parent }
     rp.FilterType = Enum.RaycastFilterType.Blacklist
-    return workspace:Raycast(hrp.Position, Vector3.new(0, -6, 0), rp) ~= nil
+    return self:_raycastWalk(hrp.Position, Vector3.new(0, -6, 0), rp) ~= nil
 end
 
 function CommandEngine:_getGroundY(pos, ignoreModel)
     local rp = RaycastParams.new()
     rp.FilterDescendantsInstances = { ignoreModel or self:_getHrp().Parent }
     rp.FilterType = Enum.RaycastFilterType.Blacklist
-    local r = workspace:Raycast(Vector3.new(pos.X, pos.Y + 10, pos.Z), Vector3.new(0, -1000, 0), rp)
+    local r = self:_raycastWalk(Vector3.new(pos.X, pos.Y + 10, pos.Z), Vector3.new(0, -1000, 0), rp)
     return r and r.Position.Y or pos.Y
 end
 
