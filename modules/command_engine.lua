@@ -1411,13 +1411,22 @@ end
 function CommandEngine:_isInSpawnZone()
 	local hrp = self:_getHrp()
 	if not hrp then
-		return false, nil
+		return false, nil, { reason = "no_hrp" }
 	end
 	local player = self:_getPlayer()
 	local pos = hrp.Position
-	local ok, inZone, spawnName = pcall(function()
+	local playerTeamColor = player and player.TeamColor or nil
+	local ok, inZone, spawnName, diag = pcall(function()
+		-- Диагностика: ближайшая Enabled-площадка независимо от команды/попадания.
+		local nearest = nil
+		local nearestDist = math.huge
 		for _, inst in ipairs(workspace:GetDescendants()) do
 			if inst:IsA("SpawnLocation") and inst.Enabled then
+				local dXZ = (Vector3.new(pos.X, 0, pos.Z) - Vector3.new(inst.Position.X, 0, inst.Position.Z)).Magnitude
+				if dXZ < nearestDist then
+					nearestDist = dXZ
+					nearest = inst
+				end
 				local teamOk = inst.Neutral
 				if not teamOk and player then
 					teamOk = inst.TeamColor == player.TeamColor
@@ -1430,17 +1439,38 @@ function CommandEngine:_isInSpawnZone()
 						and dz <= inst.Size.Z / 2 + 6
 						and dy >= -5 and dy <= 8
 					then
-						return true, inst.Name
+						return true, inst.Name, nil
 					end
 				end
 			end
 		end
-		return false, nil
+		if nearest then
+			local dx = math.abs(pos.X - nearest.Position.X)
+			local dz = math.abs(pos.Z - nearest.Position.Z)
+			local dy = pos.Y - nearest.Position.Y
+			return false, nil, {
+				reason = "out_of_zone",
+				pos = { x = math.floor(pos.X * 10) / 10, y = math.floor(pos.Y * 10) / 10, z = math.floor(pos.Z * 10) / 10 },
+				player_team_color = playerTeamColor and tostring(playerTeamColor) or "nil",
+				nearest = {
+					name = nearest.Name,
+					neutral = nearest.Neutral,
+					team_color = tostring(nearest.TeamColor),
+					dx = math.floor(dx * 10) / 10,
+					dz = math.floor(dz * 10) / 10,
+					dy = math.floor(dy * 10) / 10,
+					need_dx = math.floor((nearest.Size.X / 2 + 6) * 10) / 10,
+					need_dz = math.floor((nearest.Size.Z / 2 + 6) * 10) / 10,
+					dist_xz = math.floor(nearestDist * 10) / 10,
+				},
+			}
+		end
+		return false, nil, { reason = "no_enabled_spawn" }
 	end)
 	if ok then
-		return inZone, spawnName
+		return inZone, spawnName, diag
 	end
-	return false, nil
+	return false, nil, { reason = "scan_error", err = tostring(inZone) }
 end
 
 function CommandEngine:_respawn(payload)
@@ -1458,8 +1488,28 @@ function CommandEngine:_respawn(payload)
 	if self:_isCancelled() then
 		return { success = false, error = "cancelled" }
 	end
+	local spawnCheckDiag = nil
 	if skipInSpawn then
-		local inSpawn, spawnName = self:_isInSpawnZone()
+		local inSpawn, spawnName, diag = self:_isInSpawnZone()
+		spawnCheckDiag = diag
+		local px, py, pz = 0, 0, 0
+		local hrpNow = self:_getHrp()
+		if hrpNow then
+			px, py, pz = hrpNow.Position.X, hrpNow.Position.Y, hrpNow.Position.Z
+		end
+		local diagStr = "nil"
+		if diag then
+			if diag.reason == "out_of_zone" and diag.nearest then
+				diagStr = string.format("out_of_zone nearest=%s dXZ=%.1f dx=%.1f dz=%.1f dy=%.1f need=(%.1f,%.1f) neutral=%s padTeam=%s playerTeam=%s",
+					tostring(diag.nearest.name), diag.nearest.dist_xz, diag.nearest.dx, diag.nearest.dz, diag.nearest.dy,
+					diag.nearest.need_dx, diag.nearest.need_dz,
+					tostring(diag.nearest.neutral), tostring(diag.nearest.team_color), tostring(diag.player_team_color))
+			else
+				diagStr = tostring(diag.reason)
+			end
+		end
+		warn(string.format("[CommandEngine] respawn spawn-check: inSpawn=%s pos=(%.1f, %.1f, %.1f) %s",
+			tostring(inSpawn), px, py, pz, diagStr))
 		if inSpawn then
 			return {
 				success = true,
@@ -1468,6 +1518,7 @@ function CommandEngine:_respawn(payload)
 					skipped = true,
 					in_spawn = true,
 					spawn = spawnName,
+					spawn_check = spawnCheckDiag,
 				},
 			}
 		end
@@ -1517,7 +1568,7 @@ function CommandEngine:_respawn(payload)
 		end
 	end
 
-	return { success = true, data = { respawned = true, skipped = false } }
+	return { success = true, data = { respawned = true, skipped = false, spawn_check = spawnCheckDiag } }
 end
 
 function CommandEngine:_transferMoneyViaRespawn(payload)
