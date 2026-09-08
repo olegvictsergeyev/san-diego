@@ -790,19 +790,53 @@ function Printers:buildRoomGrid(rect, startSide, maxTotal)
 end
 
 -- Ставит один принтер в ячейку: подвод (0.6 с на репликацию), экипировка,
--- клик, поиск новой модели, сверка bbox с ячейкой (прижат к стене);
--- при промахе — подбор и повтор, до 3 попыток.
--- Диагностика: attempts-log с причиной каждой попытки (в error data),
--- чтобы по результату команды было видно, где именно обрывается цепочка.
+-- Ставит один принтер в ячейку: подвод, экипировка, клик, поиск новой
+-- модели, сверка bbox с ячейкой (прижат к стене); при промахе — подбор и
+-- повтор, до 3 попыток.
+-- Рассчитано на МЕДЛЕННЫЕ МОБИЛЬНЫЕ КЛИЕНТЫ (Xeno/Delta на телефонах):
+--  * после телепорта камера догоняет персонажа до ~1–2 с — клик «в центр»
+--    до этого момента целится не туда. Ждём сходимости камеры (до 2.5 с);
+--  * EquipTool реплицируется с задержкой — подтверждаем, что инструмент
+--    реально в руке (до 3 с), иначе клик уходит в пустоту;
+--  * репликация новой модели с сервера на мобиле — до 5–8 с: окно ожидания
+--    10 с с ПОВТОРНЫМ кликом каждые ~1.2 с, пока инструмент в руке
+--    (если клик съел UI/не дошёл — докликиваем; если инструмент уже
+--    израсходован сервером — повторный клик безопасен);
+--  * диагностика: attempts-log с причиной каждой попытки в error data.
 function Printers:_placeCell(rect, cell, isCancelled)
 	local axisX = math.abs(cell.forward.X) > 0.5
+	local player = self:_player()
 	local attemptsLog = {}
+	local function toolInHand()
+		local character = player and player.Character
+		if not character then
+			return false
+		end
+		for _, c in ipairs(character:GetChildren()) do
+			if self:_isPrinterTool(c) then
+				return true
+			end
+		end
+		return false
+	end
 	for attempt = 1, 3 do
 		if isCancelled and isCancelled() then
 			return { success = false, error = "cancelled" }
 		end
 		self:_positionCharacter(cell.charX, cell.charZ, cell.forward)
 		task.wait(0.6)
+		-- камера догоняет телепорт (мобилы): ждём совпадения направления
+		local camera = workspace.CurrentCamera
+		local tCam = tick()
+		while camera and tick() - tCam < 2.5 do
+			if camera.CFrame.LookVector:Dot(cell.forward) > 0.7 then
+				break
+			end
+			if isCancelled and isCancelled() then
+				return { success = false, error = "cancelled" }
+			end
+			task.wait(0.1)
+		end
 		local existing = {}
 		for _, c in ipairs(rect.folder:GetChildren()) do
 			if c:GetAttribute("MoneyPrinterId") then
@@ -818,14 +852,26 @@ function Printers:_placeCell(rect, cell, isCancelled)
 			table.insert(attemptsLog, string.format("attempt %d: no printer tool left", attempt))
 			return { success = false, error = "no printer tool left", attempts_log = attemptsLog }
 		end
-		task.wait(0.4)
-		self:_clickActivate()
-		local newModel, t0 = nil, tick()
-		while tick() - t0 < 4 do
+		-- экипировка реально в руке? (до 3 с)
+		local tEq = tick()
+		while not toolInHand() and tick() - tEq < 3 do
 			if isCancelled and isCancelled() then
 				return { success = false, error = "cancelled" }
 			end
 			task.wait(0.2)
+		end
+		if not toolInHand() then
+			table.insert(attemptsLog, string.format("attempt %d: equip timed out (tool not in hand after 3s)", attempt))
+		end
+		task.wait(0.3)
+		-- клик + ждём модель до 10 с; пока инструмент в руке и модели нет —
+		-- повторяем клик (первый мог не дойти/уйти в UI).
+		local newModel, t0 = nil, tick()
+		local lastClick = 0
+		while tick() - t0 < 10 do
+			if isCancelled and isCancelled() then
+				return { success = false, error = "cancelled" }
+			end
 			for _, c in ipairs(rect.folder:GetChildren()) do
 				if c:GetAttribute("MoneyPrinterId") and not existing[c] then
 					newModel = c
@@ -834,6 +880,11 @@ function Printers:_placeCell(rect, cell, isCancelled)
 			if newModel then
 				break
 			end
+			if toolInHand() and tick() - lastClick > 1.2 then
+				self:_clickActivate()
+				lastClick = tick()
+			end
+			task.wait(0.4)
 		end
 		if newModel then
 			task.wait(0.5)
@@ -859,8 +910,8 @@ function Printers:_placeCell(rect, cell, isCancelled)
 			task.wait(0.5)
 		else
 			-- модель не появилась: сервер отклонил постановку. Уточняем причину.
-			local note = string.format("attempt %d: no model after 4s (folder had %d)", attempt, beforeCount)
-			local hrp = self:_player().Character and self:_player().Character:FindFirstChild("HumanoidRootPart")
+			local note = string.format("attempt %d: no model after 10s (folder had %d)", attempt, beforeCount)
+			local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 			if hrp then
 				note = note .. string.format(", char at (%.1f, %.1f, %.1f)", hrp.Position.X, hrp.Position.Y, hrp.Position.Z)
 				local dev = math.sqrt((hrp.Position.X - cell.charX) ^ 2 + (hrp.Position.Z - cell.charZ) ^ 2)
@@ -868,19 +919,11 @@ function Printers:_placeCell(rect, cell, isCancelled)
 					note = note .. string.format(" — POSITION REVERTED (dev %.1f studs from cell)", dev)
 				end
 			end
-			local hum = self:_player().Character and self:_player().Character:FindFirstChildOfClass("Humanoid")
+			local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 			if hum and hum:GetState() == Enum.HumanoidStateType.Dead then
 				note = note .. " — HUMANOID DEAD"
 			end
-			-- инструмент остался в руке? (клик мог уйти в UI вместо мира)
-			local held = nil
-			for _, c in ipairs(self:_player().Character:GetChildren()) do
-				if self:_isPrinterTool(c) then
-					held = c.Name
-					break
-				end
-			end
-			note = note .. (held and (", tool still held: " .. held) or ", tool GONE (consumed/returned)")
+			note = note .. (toolInHand() and ", tool still held" or ", tool GONE (consumed/returned)")
 			table.insert(attemptsLog, note)
 		end
 	end
