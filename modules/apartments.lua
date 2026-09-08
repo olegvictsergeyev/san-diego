@@ -150,37 +150,51 @@ function Apartments:rent(apartmentId, isCancelled)
 	end
 
 	local doorAptId = door:GetAttribute(self.APARTMENT_ID_ATTR)
-	local callResult = nil
-	local okCall, callErr = pcall(function()
-		callResult = client.ApartmentService:PurchaseApartment(door)
-	end)
-	if not okCall then
-		return {
-			success = false,
-			error = "purchase call failed: " .. tostring(callErr),
-			data = { apartment_id = doorAptId, door_distance = math.floor(dist * 10) / 10 },
-		}
-	end
-
-	-- Верификация: сервер ставит OwnedApartmentId на игрока.
-	local deadline = tick() + self.CONFIRM_TIMEOUT
-	while tick() < deadline do
+	-- МОБИЛЬНАЯ РЕПЛИКАЦИЯ: сервер может ещё видеть персонажа вдали
+	-- и молча отклонить PurchaseApartment. Settle 1 с + до 3 ретраев;
+	-- повторный вызов безопасен (аренда идемпотентна — уже своя вернётся
+	-- через ownedApartmentId на верификации).
+	task.wait(1.0)
+	local attempts = {}
+	for attempt = 1, 3 do
 		if isCancelled and isCancelled() then
 			return { success = false, error = "cancelled" }
 		end
-		local now = self:rentedApartmentId()
-		if now then
+		local callResult = nil
+		local okCall, callErr = pcall(function()
+			callResult = client.ApartmentService:PurchaseApartment(door)
+		end)
+		if not okCall then
 			return {
-				success = true,
-				data = {
-					rented = true,
-					already_rented = false,
-					apartment_id = now,
-					door_distance = math.floor(dist * 10) / 10,
-				},
+				success = false,
+				error = "purchase call failed: " .. tostring(callErr),
+				data = { apartment_id = doorAptId, door_distance = math.floor(dist * 10) / 10 },
 			}
 		end
-		task.wait(0.25)
+
+		-- Верификация: сервер ставит OwnedApartmentId на игрока.
+		local deadline = tick() + 4
+		while tick() < deadline do
+			if isCancelled and isCancelled() then
+				return { success = false, error = "cancelled" }
+			end
+			local now = self:rentedApartmentId()
+			if now then
+				return {
+					success = true,
+					data = {
+						rented = true,
+						already_rented = false,
+						apartment_id = now,
+						door_distance = math.floor(dist * 10) / 10,
+						attempts = attempt,
+					},
+				}
+			end
+			task.wait(0.25)
+		end
+		table.insert(attempts, string.format("attempt %d: not confirmed in 4s (purchase_result=%s)", attempt, tostring(callResult)))
+		task.wait(1.0)
 	end
 
 	return {
@@ -189,7 +203,7 @@ function Apartments:rent(apartmentId, isCancelled)
 		data = {
 			apartment_id = doorAptId,
 			door_distance = math.floor(dist * 10) / 10,
-			purchase_result = tostring(callResult),
+			attempts_log = attempts,
 		},
 	}
 end

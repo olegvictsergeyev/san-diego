@@ -426,6 +426,21 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff)
 			turned = errYaw < 0.1
 			task.wait(self.DT)
 		end
+		-- ВРАТА ВЫРАВНИВАНИЯ: на медленных мобилках физика/AO отстают,
+		-- и без гейта техника стартовала бы на полном ходу с кривым носом
+		-- — «сбивается с траектории и едет не туда». Лучше честный отказ.
+		if not s.root.Parent then
+			self:_teardown()
+			return { success = false, error = "vehicle disappeared during align" }
+		end
+		local finalYaw = yawErrTo(courseDir(root.Position))
+		if finalYaw > 0.35 then
+			pcall(function()
+				s.bv.Velocity = Vector3.zero
+			end)
+			self:_teardown()
+			return { success = false, error = string.format("align timeout (yaw err %.2f)", finalYaw), data = { aligned = false } }
+		end
 	end
 	pcall(function()
 		s.bv.Velocity = Vector3.zero
@@ -463,12 +478,20 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff)
 	local stuckAt, stuckDist = tick(), math.huge
 	local abortReason, brakeStartX = nil, nil
 	local jumped, jumpSpeed = false, 0
+	local knockTicks = 0
 	local timeout = math.max(math.abs(dx) / 200 + 40, math.abs(dx) / math.max(targetVmax, 30) * 1.5 + 40)
+	-- Медленные мобилки: тик длиннее номинала, поэтому dt меряем по
+	-- факту — иначе интегратор скорости врёт, а дистанция торможения
+	-- рассчитана по командной скорости → перелёт цели.
+	local lastTick = tick()
 	while tick() - t0 < timeout and s.root.Parent do
 		if isCancelled and isCancelled() then
 			abortReason = "cancelled"
 			phase = "brake"
 		end
+		local now = tick()
+		local dtReal = math.min(now - lastTick, 0.5)
+		lastTick = now
 		local p = root.Position
 		local gy = self:_groundY(s, p)
 		-- курс и руление: поворот носа к желаемому направлению
@@ -477,12 +500,15 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff)
 			s.ao.CFrame = CFrame.lookAt(p, p + d)
 		end)
 		local errYaw = yawErrTo(d)
-		-- препятствия впереди (низким и средним лучом вдоль оси дороги;
-		-- пока далеко от полосы и идёт выравнивание — не детектим)
+		-- препятствия впереди (лучи вдоль оси дороги; дальность — от
+		-- скорости: на мобиле тик длинный, фиксированные 36 стадов
+		-- «пролетаются» за один тик до того, как луч сработает);
+		-- пока далеко от полосы и идёт выравнивание — не детектим
 		if phase ~= "brake" and math.abs(p.Z - laneZ) < 10 then
-			local ahead = Vector3.new(6 * dir, 0, 0)
-			local b1 = workspace:Raycast(p + Vector3.new(0, 0.3, 0) + ahead, ahead * 5, s.rayParams)
-			local b2 = workspace:Raycast(p + Vector3.new(0, 1.6, 0) + ahead, ahead * 5, s.rayParams)
+			local lookAhead = math.max(40, v * 0.6)
+			local ahead = Vector3.new(lookAhead * dir, 0, 0)
+			local b1 = workspace:Raycast(p + Vector3.new(6 * dir, 0.3, 0), ahead, s.rayParams)
+			local b2 = workspace:Raycast(p + Vector3.new(6 * dir, 1.6, 0), ahead, s.rayParams)
 			if b1 or b2 then
 				local hitName = "unknown"
 				pcall(function()
@@ -491,8 +517,8 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff)
 				local shifted = false
 				for _, dz in ipairs({14, -14, 28, -28, 42, -42}) do
 					local tp = Vector3.new(p.X, p.Y, laneZ + dz)
-					local h1 = workspace:Raycast(tp + Vector3.new(0, 0.3, 0), Vector3.new(30 * dir, 0, 0), s.rayParams)
-					local h2 = workspace:Raycast(tp + Vector3.new(0, 1.6, 0), Vector3.new(30 * dir, 0, 0), s.rayParams)
+					local h1 = workspace:Raycast(tp + Vector3.new(0, 0.3, 0), ahead, s.rayParams)
+					local h2 = workspace:Raycast(tp + Vector3.new(0, 1.6, 0), ahead, s.rayParams)
 					if not h1 and not h2 then
 						laneZ = laneZ + dz
 						shifted = true
@@ -505,15 +531,21 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff)
 				end
 			end
 		end
+		-- сторож схода с полосы: толчок/срыв отбросил технику далеко от
+		-- курса — дальше на ходу она уйдёт ещё дальше, тормозим честно
+		if phase ~= "brake" and math.abs(p.Z - laneZ) > 60 then
+			abortReason = string.format("off course (lane err %.0f)", math.abs(p.Z - laneZ))
+			phase = "brake"
+		end
 		if phase == "accel" then
-			v = math.min(v + ACCEL * self.DT, targetVmax)
+			v = math.min(v + ACCEL * dtReal, targetVmax)
 			if not t300 and v >= 300 then
-				t300 = tick() - t0
+				t300 = now - t0
 			end
 			if jumpOff then
 				-- без торможения: цель достигнута (или будет достигнута
 				-- на следующих тиках) — спрыгиваем, техника катится сама
-				if dir * (targetX - p.X) <= math.max(v * self.DT * 1.5, 3) then
+				if dir * (targetX - p.X) <= math.max(v * dtReal * 1.5, 3) then
 					jumped = true
 					jumpSpeed = s.root.AssemblyLinearVelocity.Magnitude
 					break
@@ -523,7 +555,7 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff)
 				brakeStartX = p.X
 			end
 		elseif phase == "brake" then
-			v = math.max(v - BRAKE_CMD * self.DT, 0)
+			v = math.max(v - BRAKE_CMD * dtReal, 0)
 			if v <= 0 then break end
 		end
 		-- тяга только вдоль продольной оси; при большом отклонении курса
@@ -533,10 +565,17 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff)
 			s.bv.Velocity = flatLook() * ve + Vector3.new(0, holdY(p), 0)
 		end)
 		local speed = s.root.AssemblyLinearVelocity.Magnitude
-		-- сброс анти-чита/срыв сцепления: скорость рухнула при высокой команде
+		-- сброс анти-чита/срыв сцепления: скорость рухнула при высокой
+		-- команде; на мобиле чтение скорости «скачет» — гистерезис
+		-- из 2 подряд тиков против ложных срабатываний
 		if phase ~= "brake" and ve > 30 and speed < ve * 0.35 then
-			abortReason = string.format("knock at v=%d", math.floor(ve))
-			phase = "brake"
+			knockTicks = knockTicks + 1
+			if knockTicks >= 2 then
+				abortReason = string.format("knock at v=%d", math.floor(ve))
+				phase = "brake"
+			end
+		else
+			knockTicks = 0
 		end
 		vmax = math.max(vmax, speed)
 		-- сторож застревания, сильно ослабленный: только в фазе разгона/
@@ -616,8 +655,15 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff)
 		lane_z = laneZ,
 		time = math.floor((tick() - t0) * 10) / 10,
 	}
+	-- верификация прибытия: без неё бэкенд цепляет следующие шаги сцена-
+	-- рия от НЕправильной точки — «приехал не туда», а дальше всё ломается
+	local overshoot = (pEnd.X - targetX) * dir
+	data.overshoot = math.floor(overshoot)
 	if t300 then
 		data.t_300 = math.floor(t300 * 10) / 10
+	end
+	if not abortReason and math.abs(overshoot) > 40 then
+		return { success = false, error = string.format("missed target by %d studs", math.floor(overshoot)), data = data }
 	end
 	if abortReason then
 		return { success = false, error = abortReason, data = data }
