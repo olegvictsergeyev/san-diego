@@ -9,7 +9,7 @@
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-	version = "2.12.20",
+	version = "2.12.21",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",

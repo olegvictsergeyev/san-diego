@@ -556,6 +556,10 @@ function Agent:_fetcherLoop()
 		local ok, command = pcall(function()
 			return self:_fetchNextCommand()
 		end)
+		-- Любой вернувшийся ответ (команда, таймаут long poll, ошибка HTTP)
+		-- — признак живого fetcher'а. Зависший внутри запроса fetcher НЕ
+		-- обновляет метку — его ловит watchdog в status loop.
+		self._lastFetchActivity = tick()
 		if not ok then
 			self:_log("ERROR", "fetcher loop error:", tostring(command))
 			task.wait(self.config.commandRetryDelay)
@@ -614,8 +618,62 @@ function Agent:_statusLoop()
 			if not ok then
 				self:_log("ERROR", "status loop error:", tostring(err))
 			end
+			self:_checkFetcherWatchdog()
 		end
 	end
+end
+
+-- Самовосстановление при зависшем fetcher'е. Симптом (наблюдён на живом
+-- клиенте 08.09.2026): heartbeat/time_1 продолжают идти (status loop жив),
+-- а команды перестают приходить — бэкенд раздаёт их зависшему/мёртвому
+-- long-poll (zombie), а живой агент не получает ничего >3 минут. Лечим
+-- штатным self-restart (как update_agent): новый инстанс регистрирует
+-- свежий long-poll. Частота ограничена: не чаще раза в 10 минут.
+function Agent:_checkFetcherWatchdog()
+	if self:_isTeleporting() then
+		return
+	end
+	local idleFor = tick() - (self._lastFetchActivity or 0)
+	if idleFor < 180 then
+		return
+	end
+	if tick() - (self._lastSelfRestart or 0) < 600 then
+		return
+	end
+	self:_selfRestart(string.format("fetcher idle watchdog: no poll activity for %ds", math.floor(idleFor)))
+end
+
+function Agent:_selfRestart(reason)
+	self._lastSelfRestart = tick()
+	task.spawn(function()
+		self:_log("WARN", "self-restart triggered:", reason)
+		if typeof(getgenv) ~= "function" or typeof(loadstring) ~= "function" then
+			self:_log("ERROR", "self-restart aborted: getgenv/loadstring unavailable")
+			return
+		end
+		local genv = getgenv()
+		genv.StopSanDiegoAgent = true
+		local waited = 0
+		while genv.SanDiegoAgentRunning and waited < 15 do
+			task.wait(0.2)
+			waited = waited + 0.2
+		end
+		if genv.SanDiegoAgentRunning then
+			self:_log("ERROR", "self-restart: agent did not stop in 15s, aborting to avoid double start")
+			genv.StopSanDiegoAgent = false
+			return
+		end
+		task.wait(0.5)
+		genv.StopSanDiegoAgent = false
+		local baseUrl = genv.SanDiegoAgentBaseUrl or "https://raw.githubusercontent.com/olegvictsergeyev/san-diego/main"
+		self:_log("WARN", "self-restart: reloading loader", baseUrl)
+		local ok, err = pcall(function()
+			loadstring(game:HttpGet(baseUrl .. "/final/agent.lua?nocache=" .. tostring(tick())))()
+		end)
+		if not ok then
+			self:_log("ERROR", "self-restart reload failed:", tostring(err))
+		end
+	end)
 end
 
 function Agent:start()
@@ -626,6 +684,8 @@ function Agent:start()
 
 	self.running = true
 	self:_log("INFO", "starting agent for game", self.config.gameSlug)
+	self._lastFetchActivity = tick()
+	self._lastSelfRestart = 0
 
 	self:_sendStatus()
 
