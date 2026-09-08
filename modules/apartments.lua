@@ -282,29 +282,63 @@ function Apartments:setDoorOpen(targetOpen, isCancelled)
 		task.wait(0.1)
 	end
 
-	local okCall, callErr = pcall(function()
-		client.ApartmentService:ToggleApartmentDoor(door)
-	end)
-	if not okCall then
-		data.open = doorOpen()
-		return { success = false, error = "toggle call failed: " .. tostring(callErr), data = data }
-	end
-
-	-- верификация: атрибут должен дойти до целевого состояния
-	local deadline = tick() + 4
-	while tick() < deadline do
+	-- МОБИЛЬНАЯ РЕПЛИКАЦИЯ: после подхода к двери сервер ещё ~1 с видит
+	-- персонажа на старом месте и МОЛЧА отклоняет ToggleApartmentDoor
+	-- (клиентская дистанция 18.4 < max 20, серверная — уже нет). Даём
+	-- позиции доехать до сервера и ретраим вызов до 4 раз: пока дверь
+	-- не перешла в целевое состояние, серверный вызов безопасен (no-op
+	-- или очередной reject — атрибут двери меняет только сервер).
+	task.wait(1.0)
+	local attempts = {}
+	for attempt = 1, 4 do
 		if isCancelled and isCancelled() then
 			return { success = false, error = "cancelled", data = data }
 		end
+		-- позиция могла откатиться (boundary) или дверь уже дошла до цели
+		local okPos, doorPos = pcall(function()
+			return door:GetPivot().Position
+		end)
+		if okPos and doorPos then
+			dist = (doorPos - hrp.Position).Magnitude
+			data.door_distance = math.floor(dist * 10) / 10
+			if dist > self.MAX_DOOR_DISTANCE then
+				data.open = doorOpen()
+				return { success = false, error = string.format("door is %.1f studs away (max %d)", dist, self.MAX_DOOR_DISTANCE), data = data }
+			end
+		end
 		if doorOpen() == targetOpen then
 			data.open = targetOpen
-			data.toggled = true
+			data.toggled = attempt > 1 or nil
+			data.attempts = attempt
 			return { success = true, data = data }
 		end
-		task.wait(0.1)
+		local okCall, callErr = pcall(function()
+			client.ApartmentService:ToggleApartmentDoor(door)
+		end)
+		if not okCall then
+			data.open = doorOpen()
+			return { success = false, error = "toggle call failed: " .. tostring(callErr), data = data }
+		end
+		-- верификация: атрибут должен дойти до целевого состояния
+		local deadline = tick() + 2.5
+		while tick() < deadline do
+			if isCancelled and isCancelled() then
+				return { success = false, error = "cancelled", data = data }
+			end
+			if doorOpen() == targetOpen then
+				data.open = targetOpen
+				data.toggled = true
+				data.attempts = attempt
+				return { success = true, data = data }
+			end
+			task.wait(0.1)
+		end
+		table.insert(attempts, string.format("attempt %d: no state change in 2.5s (server rejected?)", attempt))
+		task.wait(1.0)
 	end
 
 	data.open = doorOpen()
+	data.attempts_log = attempts
 	return { success = false, error = "door did not reach target state (server rejected?)", data = data }
 end
 
