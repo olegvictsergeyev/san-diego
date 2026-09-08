@@ -1130,12 +1130,19 @@ function CommandEngine:_avoidAround(hrp, targetPos, stepSize, waitTime, setHrpCF
 		if probe then
 			return true
 		end
-		-- боковой шаг вдоль препятствия
-		local newPos = self:_adjustStep(p, p + left * side * stepSize)
+		-- шаг вдоль препятствия С НАКЛОНОМ ВПЕРЁД (0.7 бок + 0.7 вперёд):
+		-- огибаем стену и одновременно двигаемся к цели, а не маршируем
+		-- чисто боком. Перебор: диагональ → чисто бок → другая сторона.
+		local newPos = self:_adjustStep(p, p + (left * side * 0.7 + d * 0.7) * stepSize)
 		if not newPos then
-			-- в тупике сбоку — разворачиваем обход на другую сторону
-			side = -side
 			newPos = self:_adjustStep(p, p + left * side * stepSize)
+		end
+		if not newPos then
+			side = -side
+			newPos = self:_adjustStep(p, p + (left * side * 0.7 + d * 0.7) * stepSize)
+			if not newPos then
+				newPos = self:_adjustStep(p, p + left * side * stepSize)
+			end
 			if not newPos then
 				return false, "walled from both sides"
 			end
@@ -1264,7 +1271,9 @@ function CommandEngine:_moveTo(payload)
 			noProgress = 0
 		else
 			noProgress = noProgress + 1
-			if noProgress > 80 then
+			-- 200 шагов ≈ 50 с без сближения: длинный, но легальный
+			-- обход большого здания не должен обрываться раньше времени.
+			if noProgress > 200 then
 				blockedReason = "avoid loop: no progress to target"
 				break
 			end
