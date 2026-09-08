@@ -865,10 +865,24 @@ function CommandEngine:_adjustStep(currentPos, targetPos)
 		local dir = flat.Unit
 		local hit = workspace:Raycast(currentPos + Vector3.new(0, -1, 0), dir * (dist + 2), params)
 		if hit then
-			local probe = workspace:Raycast(hit.Position + dir * 1.5 + Vector3.new(0, 25, 0), Vector3.new(0, -60, 0), params)
-			local topY = probe and probe.Position.Y
-			if topY and (topY - currentPos.Y) <= 12 then
-				targetPos = Vector3.new(targetPos.X, topY + 3.2, targetPos.Z)
+			-- Профиль препятствия: серия лучей вперёд нарастающей высоты.
+			-- Первая «чистая» высота — это высота препятствия. Нельзя искать
+			-- «вершину» зондом сверху вниз (как раньше): сквозь тонкую стену
+			-- он проваливается на потолок за ней, стена выглядит ступенькой
+			-- ≤12 ст и персонаж телепортируется ВНУТРЬ перекрытия (баг
+			-- «застрял в потолке» в дверном проёме).
+			local heights = { -1, 0.2, 1.2, 2.2, 3.2, 4.5, 6, 8, 10, 12.5 }
+			local clearance = nil
+			for _, h in ipairs(heights) do
+				local o = Vector3.new(currentPos.X, currentPos.Y + h, currentPos.Z)
+				local hhit = workspace:Raycast(o, dir * (dist + 2), params)
+				if not hhit then
+					clearance = h
+					break
+				end
+			end
+			if clearance and clearance <= 12.5 then
+				targetPos = Vector3.new(targetPos.X, currentPos.Y + clearance + 0.4, targetPos.Z)
 			else
 				return nil, "blocked: " .. hit.Instance.Name
 			end
