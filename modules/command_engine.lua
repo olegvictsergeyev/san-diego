@@ -1002,7 +1002,27 @@ function CommandEngine:_moveAxis(axis, payload)
 	end
 
 	local blockedReason = nil
+	-- Адаптивный пейсинг против AntiTp: сервер периодически откатывает
+	-- шаговые телепорты на скорости 32 ст/с (порог его детектора плавает).
+	-- При откате ЗАМЕДЛЯЕМ темп, а не падаем сразу; при чистых шагах
+	-- плавно разгоняемся обратно. Прерываемся, только если откаты идут
+	-- подряд даже на предельно медленном темпе — тогда мешает не скорость,
+	-- а что-то внешнее.
 	local rollbacks = 0
+	local throttle = waitTime
+	local function pace(dev)
+		if dev > 2.5 then
+			rollbacks = rollbacks + 1
+			throttle = math.min(0.65, throttle + 0.15)
+			if rollbacks >= 5 then
+				return false, string.format("antichit: position rollback (deviation %.1f studs, aborted)", dev)
+			end
+		else
+			rollbacks = 0
+			throttle = math.max(waitTime, throttle - 0.03)
+		end
+		return true
+	end
 	for _ = 1, steps do
 		if self:_isCancelled() then
 			return { success = false, error = "cancelled" }
@@ -1028,26 +1048,19 @@ function CommandEngine:_moveAxis(axis, payload)
 		if not setHrpCFrame(CFrame.new(newPos) * CFrame.Angles(0, startYaw, 0)) then
 			return { success = false, error = "HumanoidRootPart lost during movement" }
 		end
-		task.wait(waitTime)
+		task.wait(throttle)
 		-- Детект античита (AntiTp): сервер откатывает телепорт — фактическая
 		-- позиция не совпадает с командной. По горизонтали (по Y падение
-		-- законно). 3 отката подряд ≥2.5 ст → прерываем команду с error.
+		-- законно). Откат → замедление темпа (см. pace выше).
 		if axis ~= "y" then
 			local hrpNow = self:_getHrp()
 			if hrpNow then
 				local ddx = hrpNow.Position.X - newPos.X
 				local ddz = hrpNow.Position.Z - newPos.Z
 				local dev = math.sqrt(ddx * ddx + ddz * ddz)
-				if dev > 2.5 then
-					rollbacks = rollbacks + 1
-					if rollbacks >= 3 then
-						return {
-							success = false,
-							error = string.format("antichit: position rollback (deviation %.1f studs, aborted)", dev),
-						}
-					end
-				else
-					rollbacks = 0
+				local okPace, paceErr = pace(dev)
+				if not okPace then
+					return { success = false, error = paceErr }
 				end
 			end
 		end
@@ -1131,6 +1144,7 @@ function CommandEngine:_avoidAround(hrp, targetPos, stepSize, waitTime, setHrpCF
 	local visited = {}
 	local t0 = tick()
 	local rollbacks = 0
+	local throttle = waitTime
 
 	while detour < maxDetour and tick() - t0 < 120 do
 		if self:_isCancelled() then
@@ -1176,8 +1190,10 @@ function CommandEngine:_avoidAround(hrp, targetPos, stepSize, waitTime, setHrpCF
 			return false, "HumanoidRootPart lost during movement"
 		end
 		detour = detour + stepSize
-		task.wait(waitTime)
-		-- Детект античита (AntiTp): откат телепорта сервером.
+		task.wait(throttle)
+		-- Детект античита (AntiTp): откат телепорта сервером → замедляем
+		-- темп (как в moveAxis/moveTo); 5 подряд даже на минимальной
+		-- скорости — внешнее вмешательство, прерываем обход.
 		local hrpNow = self:_getHrp()
 		if hrpNow then
 			local ddx = hrpNow.Position.X - newPos.X
@@ -1185,11 +1201,13 @@ function CommandEngine:_avoidAround(hrp, targetPos, stepSize, waitTime, setHrpCF
 			local dev = math.sqrt(ddx * ddx + ddz * ddz)
 			if dev > 2.5 then
 				rollbacks = rollbacks + 1
-				if rollbacks >= 3 then
-					return false, string.format("antichit: position rollback (deviation %.1f studs)", dev)
+				throttle = math.min(0.65, throttle + 0.15)
+				if rollbacks >= 5 then
+					return false, string.format("antichit: position rollback (deviation %.1f studs, aborted)", dev)
 				end
 			else
 				rollbacks = 0
+				throttle = math.max(waitTime, throttle - 0.03)
 			end
 		end
 	end
@@ -1274,6 +1292,7 @@ function CommandEngine:_moveTo(payload)
 	local noProgress = 0
 	local blockedReason = nil
 	local rollbacks = 0
+	local throttle = waitTime
 
 	while tick() < deadline do
 		if self:_isCancelled() then
@@ -1305,8 +1324,9 @@ function CommandEngine:_moveTo(payload)
 			if not setHrpCFrame(CFrame.new(adjusted) * CFrame.Angles(0, startYaw, 0)) then
 				return { success = false, error = "HumanoidRootPart lost during movement" }
 			end
-			task.wait(waitTime)
-			-- Детект античита (AntiTp): откат телепорта сервером.
+			task.wait(throttle)
+			-- Детект античита (AntiTp): откат телепорта сервером →
+			-- замедляем темп, чистые шаги → плавный разгон обратно.
 			local hrpNow = self:_getHrp()
 			if hrpNow then
 				local ddx = hrpNow.Position.X - adjusted.X
@@ -1314,7 +1334,8 @@ function CommandEngine:_moveTo(payload)
 				local dev = math.sqrt(ddx * ddx + ddz * ddz)
 				if dev > 2.5 then
 					rollbacks = rollbacks + 1
-					if rollbacks >= 3 then
+					throttle = math.min(0.65, throttle + 0.15)
+					if rollbacks >= 5 then
 						return {
 							success = false,
 							error = string.format("antichit: position rollback (deviation %.1f studs, aborted)", dev),
@@ -1322,12 +1343,17 @@ function CommandEngine:_moveTo(payload)
 					end
 				else
 					rollbacks = 0
+					throttle = math.max(waitTime, throttle - 0.03)
 				end
 			end
 		else
 			local okAvoid, avoidErr = self:_avoidAround(hrp, Vector3.new(x, p.Y, z), stepSize, waitTime, setHrpCFrame, startYaw)
 			if not okAvoid then
-				blockedReason = tostring(reason) .. " (avoid: " .. tostring(avoidErr) .. ")"
+				avoidErr = tostring(avoidErr)
+				if avoidErr:sub(1, 9) == "antichit:" then
+					return { success = false, error = avoidErr }
+				end
+				blockedReason = tostring(reason) .. " (avoid: " .. avoidErr .. ")"
 				break
 			end
 		end
