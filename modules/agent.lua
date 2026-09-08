@@ -565,8 +565,24 @@ function Agent:_fetcherLoop()
 			task.wait(self.config.commandRetryDelay)
 		elseif command then
 			self:_log("INFO", "received command from backend", command.id, command.name)
+			-- Ack НЕМЕДЛЕННО при получении, а не при старте исполнения:
+			-- иначе reaper бэкенда отклоняет команду (no ack after retries),
+			-- пока worker занят длинной командой — наблюдено вживую:
+			-- аварийный respawn во время зависшего move_to ушёл в declined,
+			-- персонаж продолжал падать в пустоту.
+			pcall(function()
+				self:_updateCommandStatus(command.id, "in_progress", "ack")
+			end)
 			if command.name == "cancel" then
 				self:_handleCancel(command)
+			elseif command.name == "respawn" and self.currentCommand then
+				-- АВАРИЙНЫЙ РЕСПАВН: прерываем текущую команду и ставим
+				-- respawn в начало очереди — worker доберётся до него
+				-- сразу после завершения отменённой команды (петли
+				-- движения проверяют cancel каждую итерацию, <1 с).
+				self:_log("WARN", "respawn: preempting current command", self.currentCommand.id)
+				self.engine:requestCancel()
+				table.insert(self.commandQueue, 1, command)
 			else
 				table.insert(self.commandQueue, command)
 			end
@@ -619,7 +635,38 @@ function Agent:_statusLoop()
 				self:_log("ERROR", "status loop error:", tostring(err))
 			end
 			self:_checkFetcherWatchdog()
+			self:_checkVoidFall()
 		end
+	end
+end
+
+-- Падение в пустоту под картой: легальные зоны San Diego не ниже y≈-90
+-- (подвальные этажи апартаментов ~-84), поэтому y < -120 — это провал
+-- сквозь текстуры/границу. Персонаж падает бесконечно, пешие команды не
+-- могут ни доехать, ни честно упасть — worker сидит в движении до таймаута,
+-- а внешние respawn'ы при этом теряются reaper'ом (до фикса ack-on-receipt).
+-- Детектим сами и убиваем персонажа немедленно (cooldown 120 с).
+function Agent:_checkVoidFall()
+	if self:_isTeleporting() then
+		return
+	end
+	if tick() - (self._lastEmergencyRespawn or 0) < 120 then
+		return
+	end
+	local player = game:GetService("Players").LocalPlayer
+	local char = player and player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not (hrp and hum) or hum.Health <= 0 then
+		return
+	end
+	if hrp.Position.Y < -120 then
+		self._lastEmergencyRespawn = tick()
+		self:_log("WARN", string.format("void fall detected at y=%.1f — emergency respawn", hrp.Position.Y))
+		self.engine:requestCancel()
+		pcall(function()
+			hum.Health = 0
+		end)
 	end
 end
 
