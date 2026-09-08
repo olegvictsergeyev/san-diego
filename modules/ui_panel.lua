@@ -9,7 +9,7 @@
 
 local CONFIG = {
     -- Версия агента (major.minor.patch). Сейчас ранняя альфа.
-	version = "2.12.12",
+	version = "2.12.13",
 
     -- URL существующего сервиса
     baseUrl = "http://195.161.68.193:5173/api",
@@ -61,6 +61,7 @@ local CONFIG = {
             disconnect_watcher = base .. "/modules/disconnect_watcher.lua",
             autoexec = base .. "/modules/autoexec.lua",
             afk = base .. "/modules/afk.lua",
+            anticheat_guard = base .. "/modules/anticheat_guard.lua",
             printers = base .. "/modules/printers.lua",
             vehicles = base .. "/modules/vehicles.lua",
             apartments = base .. "/modules/apartments.lua",
@@ -133,6 +134,7 @@ local CommandEngine = loadModule("command_engine")
 local ResultStore = loadModule("result_store")
 local Agent = loadModule("agent")
 local Afk = loadModule("afk")
+local AnticheatGuard = loadModule("anticheat_guard")
 local Printers = loadModule("printers")
 local Vehicles = loadModule("vehicles")
 local Apartments = loadModule("apartments")
@@ -162,7 +164,9 @@ local function makeAgent()
     local printers = Printers.new()
     local vehicles = Vehicles.new()
     local apartments = Apartments.new()
-    local engine = CommandEngine.new(privateServer, afk, state, printers, vehicles, apartments)
+    local anticheatGuard = AnticheatGuard.new()
+    anticheatGuard:start()
+    local engine = CommandEngine.new(privateServer, afk, state, printers, vehicles, apartments, anticheatGuard)
     privateServer:setCommandEngine(engine)
     local resultStore = ResultStore.new(Compat, state:getNickname())
     privateServer:setResultStore(resultStore)

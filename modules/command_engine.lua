@@ -3,12 +3,23 @@ local Players = game:GetService("Players")
 local CommandEngine = {}
 CommandEngine.__index = CommandEngine
 
-function CommandEngine.new(privateServer, afk, state, printers, vehicles, apartments)
+function CommandEngine.new(privateServer, afk, state, printers, vehicles, apartments, anticheatGuard)
 	local self = setmetatable({}, CommandEngine)
 	self.cancelled = false
 	self.currentCommandId = nil
 	self.afk = afk
 	self.state = state
+	if anticheatGuard then
+		self.anticheatGuard = anticheatGuard
+	else
+		local ok, AnticheatGuard = pcall(function()
+			return require(script.Parent:WaitForChild("anticheat_guard"))
+		end)
+		if ok and AnticheatGuard then
+			self.anticheatGuard = AnticheatGuard.new()
+			self.anticheatGuard:start()
+		end
+	end
 	if privateServer then
 		self.privateServer = privateServer
 	else
@@ -170,6 +181,21 @@ end
 
 function CommandEngine:_isCancelled()
 	return self.cancelled
+end
+
+-- Стоп-сигнал от игры: если античит/модерация показали уведомление
+-- (WarningGui / AccountResetNoticeGui), движение прекращаем. Это ПРЯМОЙ
+-- канал сигнала игры — не путать с откатом позиции сервером (тот чаще
+-- всего физика/граница карты, см. _raycastWalk и обработку revert'ов).
+-- Возвращает строку-причину или nil.
+function CommandEngine:_anticheatBlockReason()
+	local guard = self.anticheatGuard
+	if guard and guard.isFlagged and guard:isFlagged() then
+		return "anticheat notice shown by game: "
+			.. tostring(guard:getNotice() or "moderation/anticheat warning")
+			.. " — movement paused"
+	end
+	return nil
 end
 
 function CommandEngine:resetCancel()
@@ -957,11 +983,11 @@ function CommandEngine:_moveAxis(axis, payload)
 	local _, startYaw = hrp.CFrame:ToEulerAnglesYXZ()
 
 	-- Базовые шаги: speed=10 = 8 студий за шаг, пауза 0.25 с = 32 ст/с.
-	-- ЛИМИТ АНТИЧИТА SAN DIEGO (AntiTp) — эмпирически ~32-45 ст/с (проверено
-	-- Potassium-тестами: 32 ст/с × 25с чисто, 48 ст/с — rollback позиции;
-	-- rollback'и НЕ жгут инфракции, но срывают погоню). 32 ст/с = максимум
-	-- проверенный чистым, поэтому speed=10 выдаёт именно его, не выше.
-	-- speed 1..10 масштабирует только длину шага, поэтому min в 10 раз медленнее.
+	-- Срабатывания античита детектит AnticheatGuard по GUI-уведомлениям
+	-- игры (WarningGui / AccountResetNoticeGui) — это каноничный канал
+	-- сигнала. Откат позиции сервером (rollback) — НЕ античит, а границы
+	-- карты / restricted-зоны (PlayerBoundary не виден рейкастами): такой
+	-- шаг считается заблокированным, повторять его не нужно.
 	-- ВАЖНО: никогда не анкорить персонажа во время движения и не делать
 	-- одиночных прыжков > 16 студий — фиксируется античитом.
 	local baseStep, baseWait
@@ -1002,30 +1028,19 @@ function CommandEngine:_moveAxis(axis, payload)
 	end
 
 	local blockedReason = nil
-	-- Адаптивный пейсинг против AntiTp: сервер периодически откатывает
-	-- шаговые телепорты на скорости 32 ст/с (порог его детектора плавает).
-	-- При откате ЗАМЕДЛЯЕМ темп, а не падаем сразу; при чистых шагах
-	-- плавно разгоняемся обратно. Прерываемся, только если откаты идут
-	-- подряд даже на предельно медленном темпе — тогда мешает не скорость,
-	-- а что-то внешнее.
-	local rollbacks = 0
-	local throttle = waitTime
-	local function pace(dev)
-		if dev > 2.5 then
-			rollbacks = rollbacks + 1
-			throttle = math.min(0.65, throttle + 0.15)
-			if rollbacks >= 5 then
-				return false, string.format("antichit: position rollback (deviation %.1f studs, aborted)", dev)
-			end
-		else
-			rollbacks = 0
-			throttle = math.max(waitTime, throttle - 0.03)
-		end
-		return true
-	end
+	-- Откат шага (фактическая позиция сервера не совпала с командной)
+	-- означает: сервер/физика отклонили телепорт — граница карты
+	-- (PlayerBoundary, рейкастами не виден), restricted-зона или редко
+	-- античит. Это НЕ повторять и НЕ «замедлять и пробовать ещё» — шаг
+	-- просто не принят, направление считаем заблокированным. Срабатывание
+	-- античита как таковое детектит AnticheatGuard по GUI игры, а не это.
 	for _ = 1, steps do
 		if self:_isCancelled() then
 			return { success = false, error = "cancelled" }
+		end
+		local acBlock = self:_anticheatBlockReason()
+		if acBlock then
+			return { success = false, error = acBlock }
 		end
 
 		current = current + stepSize
@@ -1048,19 +1063,20 @@ function CommandEngine:_moveAxis(axis, payload)
 		if not setHrpCFrame(CFrame.new(newPos) * CFrame.Angles(0, startYaw, 0)) then
 			return { success = false, error = "HumanoidRootPart lost during movement" }
 		end
-		task.wait(throttle)
-		-- Детект античита (AntiTp): сервер откатывает телепорт — фактическая
-		-- позиция не совпадает с командной. По горизонтали (по Y падение
-		-- законно). Откат → замедление темпа (см. pace выше).
+		task.wait(waitTime)
+		-- Откат сервером: шаг не принят. По горизонтали (падение по Y
+		-- законно). Одиночный откат = стоп, без повторов и «подбивания».
 		if axis ~= "y" then
 			local hrpNow = self:_getHrp()
 			if hrpNow then
 				local ddx = hrpNow.Position.X - newPos.X
 				local ddz = hrpNow.Position.Z - newPos.Z
 				local dev = math.sqrt(ddx * ddx + ddz * ddz)
-				local okPace, paceErr = pace(dev)
-				if not okPace then
-					return { success = false, error = paceErr }
+				if dev > 2.5 then
+					return {
+						success = false,
+						error = string.format("movement reverted by server (deviation %.1f studs): restricted zone, boundary or anticheat — step rejected", dev),
+					}
 				end
 			end
 		end
@@ -1143,12 +1159,13 @@ function CommandEngine:_avoidAround(hrp, targetPos, stepSize, waitTime, setHrpCF
 	local detour = 0
 	local visited = {}
 	local t0 = tick()
-	local rollbacks = 0
-	local throttle = waitTime
 
 	while detour < maxDetour and tick() - t0 < 120 do
 		if self:_isCancelled() then
 			return false, "cancelled"
+		end
+		if self:_anticheatBlockReason() then
+			return false, self:_anticheatBlockReason()
 		end
 		local p = hrp.Position
 		local dxr, dzr = targetPos.X - p.X, targetPos.Z - p.Z
@@ -1190,24 +1207,17 @@ function CommandEngine:_avoidAround(hrp, targetPos, stepSize, waitTime, setHrpCF
 			return false, "HumanoidRootPart lost during movement"
 		end
 		detour = detour + stepSize
-		task.wait(throttle)
-		-- Детект античита (AntiTp): откат телепорта сервером → замедляем
-		-- темп (как в moveAxis/moveTo); 5 подряд даже на минимальной
-		-- скорости — внешнее вмешательство, прерываем обход.
+		task.wait(waitTime)
+		-- Откат сервером: шаг вдоль препятствия не принят (граница/
+		-- restricted-зона, рейкастами не видимая). Не подбиваем повторно —
+		-- обход от этого направления невозможен.
 		local hrpNow = self:_getHrp()
 		if hrpNow then
 			local ddx = hrpNow.Position.X - newPos.X
 			local ddz = hrpNow.Position.Z - newPos.Z
 			local dev = math.sqrt(ddx * ddx + ddz * ddz)
 			if dev > 2.5 then
-				rollbacks = rollbacks + 1
-				throttle = math.min(0.65, throttle + 0.15)
-				if rollbacks >= 5 then
-					return false, string.format("antichit: position rollback (deviation %.1f studs, aborted)", dev)
-				end
-			else
-				rollbacks = 0
-				throttle = math.max(waitTime, throttle - 0.03)
+				return false, string.format("movement reverted by server (deviation %.1f studs): restricted zone, boundary or anticheat — detour rejected", dev)
 			end
 		end
 	end
@@ -1280,9 +1290,10 @@ function CommandEngine:_moveTo(payload)
 	-- При свободном пути эквивалентно прямой линии; при блоке — тангенциальный
 	-- обход (_avoidAround) до восстановления прямого прохода. Контроль
 	-- прогресса (зацикливание) и общий дедлайн.
-	-- Те же параметры, что и в _moveAxis: 8 студий за шаг, пауза 0.25 с.
-	-- speed=10 = 32 ст/с — максимум проверенный чистым (лимит античита
-	-- ~32-45 ст/с, см. _moveAxis), не выше.
+	-- Те же параметры, что и в _moveAxis: 8 студий за шаг, пауза 0.25 с
+	-- (speed=10 ≈ 32 ст/с). Срабатывания античита ловит AnticheatGuard по
+	-- GUI-уведомлениям игры; откат позиции сервером — это границы/зоны,
+	-- а не античит (см. _avoidAround).
 	local baseStep = 8
 	local baseWait = 0.25
 	local stepSize = baseStep * (speed / 10)
@@ -1291,12 +1302,14 @@ function CommandEngine:_moveTo(payload)
 	local bestRemaining = dist
 	local noProgress = 0
 	local blockedReason = nil
-	local rollbacks = 0
-	local throttle = waitTime
 
 	while tick() < deadline do
 		if self:_isCancelled() then
 			return { success = false, error = "cancelled" }
+		end
+		local acBlock = self:_anticheatBlockReason()
+		if acBlock then
+			return { success = false, error = acBlock }
 		end
 		local p = hrp.Position
 		local rx, rz = x - p.X, z - p.Z
@@ -1320,37 +1333,30 @@ function CommandEngine:_moveTo(payload)
 		local advance = math.min(stepSize, remaining)
 		local stepTarget = Vector3.new(p.X + dir.X * advance, p.Y, p.Z + dir.Z * advance)
 		local adjusted, reason = self:_adjustStep(p, stepTarget)
+		local reverted = false
 		if adjusted then
 			if not setHrpCFrame(CFrame.new(adjusted) * CFrame.Angles(0, startYaw, 0)) then
 				return { success = false, error = "HumanoidRootPart lost during movement" }
 			end
-			task.wait(throttle)
-			-- Детект античита (AntiTp): откат телепорта сервером →
-			-- замедляем темп, чистые шаги → плавный разгон обратно.
+			task.wait(waitTime)
+			-- Откат сервером: шаг не принят (граница/restricted-зона).
+			-- Пробуем обход в этом же цикле; если и он отклонён — стоп.
 			local hrpNow = self:_getHrp()
 			if hrpNow then
 				local ddx = hrpNow.Position.X - adjusted.X
 				local ddz = hrpNow.Position.Z - adjusted.Z
 				local dev = math.sqrt(ddx * ddx + ddz * ddz)
 				if dev > 2.5 then
-					rollbacks = rollbacks + 1
-					throttle = math.min(0.65, throttle + 0.15)
-					if rollbacks >= 5 then
-						return {
-							success = false,
-							error = string.format("antichit: position rollback (deviation %.1f studs, aborted)", dev),
-						}
-					end
-				else
-					rollbacks = 0
-					throttle = math.max(waitTime, throttle - 0.03)
+					reverted = true
+					reason = string.format("direct step reverted by server (deviation %.1f studs)", dev)
 				end
 			end
-		else
+		end
+		if not adjusted or reverted then
 			local okAvoid, avoidErr = self:_avoidAround(hrp, Vector3.new(x, p.Y, z), stepSize, waitTime, setHrpCFrame, startYaw)
 			if not okAvoid then
 				avoidErr = tostring(avoidErr)
-				if avoidErr:sub(1, 9) == "antichit:" then
+				if avoidErr:find("reverted by server", 1, true) or avoidErr:sub(1, 9) == "antichit:" then
 					return { success = false, error = avoidErr }
 				end
 				blockedReason = tostring(reason) .. " (avoid: " .. avoidErr .. ")"
@@ -2173,6 +2179,10 @@ function CommandEngine:_flyCarCommand(payload)
 	if not self.vehicles then
 		return { success = false, error = "vehicles module unavailable" }
 	end
+	local acBlock = self:_anticheatBlockReason()
+	if acBlock then
+		return { success = false, error = acBlock }
+	end
 	payload = payload or {}
 	local height = payload.height
 	if typeof(height) ~= "number" or height % 1 ~= 0 or height < 0 or height > 10 then
@@ -2200,6 +2210,10 @@ function CommandEngine:_navCarCommand(payload)
 	if not self.vehicles then
 		return { success = false, error = "vehicles module unavailable" }
 	end
+	local acBlock = self:_anticheatBlockReason()
+	if acBlock then
+		return { success = false, error = acBlock }
+	end
 	payload = payload or {}
 	local x, z = payload.x, payload.z
 	if typeof(x) ~= "number" or x % 1 ~= 0 or x < -2000 or x > 2000 then
@@ -2225,6 +2239,10 @@ end
 function CommandEngine:_driveCommand(payload)
 	if not self.vehicles then
 		return { success = false, error = "vehicles module unavailable" }
+	end
+	local acBlock = self:_anticheatBlockReason()
+	if acBlock then
+		return { success = false, error = acBlock }
 	end
 	payload = payload or {}
 	local x, z = payload.x, payload.z
