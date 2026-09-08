@@ -29,6 +29,10 @@ Vehicles.MAX_DRIVE_DIST = 20000
 -- обнулил скорость и откатил на точку нарушения (rewind).
 -- Кап 580 = максимум проверенный чистым заездом (предел 613 −5%).
 Vehicles.DRIVE_VMAX = 580
+-- Допуск прибытия по X по умолчанию: |фактическая X − целевая| больше
+-- этого значения = ошибка missed target. Переопределяется параметром
+-- tolerance команды drive.
+Vehicles.ARRIVE_TOLERANCE = 40
 
 function Vehicles.new()
 	local self = setmetatable({}, Vehicles)
@@ -349,11 +353,14 @@ end
 -- jumpOff — без торможения: по достижении цели персонаж спрыгивает с
 -- транспорта (humanoid.Sit = false), техника с сохранением скорости
 -- катится дальше сама; констрейнты снимаются, импульс не обнуляется.
-function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff)
+-- tolerance — допуск прибытия по X: |факт − цель| > tolerance = ошибка
+-- missed target (по умолчанию ARRIVE_TOLERANCE).
+function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance)
 	dx = tonumber(dx) or 0
 	laneZ = tonumber(laneZ) or self.DEFAULT_LANE_Z
 	speedLevel = tonumber(speedLevel) or 10
 	jumpOff = jumpOff == true
+	tolerance = tonumber(tolerance) or self.ARRIVE_TOLERANCE
 	if dx % 1 ~= 0 or math.abs(dx) > self.MAX_DRIVE_DIST then
 		return { success = false, error = "x must be an integer in [-" .. self.MAX_DRIVE_DIST .. ", " .. self.MAX_DRIVE_DIST .. "]" }
 	end
@@ -659,10 +666,11 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff)
 	-- рия от НЕправильной точки — «приехал не туда», а дальше всё ломается
 	local overshoot = (pEnd.X - targetX) * dir
 	data.overshoot = math.floor(overshoot)
+	data.tolerance = tolerance
 	if t300 then
 		data.t_300 = math.floor(t300 * 10) / 10
 	end
-	if not abortReason and math.abs(overshoot) > 40 then
+	if not abortReason and math.abs(overshoot) > tolerance then
 		return { success = false, error = string.format("missed target by %d studs", math.floor(overshoot)), data = data }
 	end
 	if abortReason then

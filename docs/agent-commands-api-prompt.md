@@ -233,7 +233,9 @@ POST /commands/{id}/status
       "params": {
         "x": { "type": "integer", "min": -20000, "max": 20000 },
         "z": { "type": "number", "min": -20000, "max": 20000 },
-        "speed": { "type": "integer", "min": 0, "max": 10 }
+        "speed": { "type": "integer", "min": 0, "max": 10 },
+        "jump_off": { "type": "boolean" },
+        "tolerance": { "type": "number", "min": 1, "max": 1000 }
       }
     },
     {

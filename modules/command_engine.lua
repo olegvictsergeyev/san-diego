@@ -567,6 +567,13 @@ function CommandEngine:getCommandsSpec()
 					required = false,
 					description = "true = не тормозить у цели: по достижении цели спрыгнуть с транспорта, техника с сохранением скорости катится дальше сама (по умолчанию false — обычная остановка у цели)",
 				},
+				tolerance = {
+					type = "number",
+					required = false,
+					min = 1,
+					max = 1000,
+					description = "Допуск прибытия по X в стадах: |фактическая X − целевая| больше допуска = ошибка missed target (по умолчанию 40)",
+				},
 			},
 		},
 		{
@@ -2261,10 +2268,14 @@ function CommandEngine:_driveCommand(payload)
 	if jumpOff ~= nil and typeof(jumpOff) ~= "boolean" then
 		return { success = false, error = "jump_off must be a boolean" }
 	end
+	local tolerance = payload.tolerance
+	if tolerance ~= nil and (typeof(tolerance) ~= "number" or tolerance < 1 or tolerance > 1000) then
+		return { success = false, error = "tolerance must be a number in [1, 1000]" }
+	end
 	local ok, res = pcall(function()
 		return self.vehicles:drive(x, z, function()
 			return self:_isCancelled()
-		end, speed, jumpOff)
+		end, speed, jumpOff, tolerance)
 	end)
 	if not ok then
 		return { success = false, error = tostring(res) }
