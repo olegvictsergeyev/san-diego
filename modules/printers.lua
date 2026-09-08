@@ -21,8 +21,14 @@ Printers.__index = Printers
 Printers.PRINTER_NAME_PATTERN = "print"
 -- Витринный предмет за игровую валюту (Super Money Printer / Booster — за Robux)
 Printers.DISPLAY_ITEM_NAME = "Money Printer"
--- Больше 50 принтеров персонажу не нужно (лимит расстановки)
+-- Больше 50 принтеров персонажу не нужно (лимит инвентаря/покупки)
 Printers.MAX_BUY = 50
+-- Лимит принтеров в ОДНОЙ комнате, принудительно введённый игрой
+-- (~08.09.2026, ~16:55 UTC): сервер принимает постановку сверх лимита
+-- (модель даже появляется и проходит bbox-проверку), а затем удаляет
+-- «лишние». Сетка расстановки обязана укладываться в этот лимит,
+-- иначе «много пропусков» и расхождение placed vs room_total.
+Printers.MAX_ROOM_PRINTERS = 20
 -- Пауза между покупками. Замерено на живом сервере: подтверждение выдачи
 -- Tool идёт за 0.11–0.16 с, серия из 8 покупок с паузой 0.15–0.8 с прошла
 -- без единого несрабатывания. 0.25 с — запас на сетевой джиттер (мобилка).
@@ -885,7 +891,8 @@ end
 -- Стартовая стена — напротив двери (модель Door), фолбэк — стена,
 -- на которую смотрит персонаж.
 function Printers:placeRoomGrid(maxTotal, isCancelled)
-	maxTotal = math.clamp(tonumber(maxTotal) or 50, 1, self.MAX_BUY)
+	-- Сетка — строго в пределах комнатного лимита игры (MAX_ROOM_PRINTERS).
+	maxTotal = math.clamp(tonumber(maxTotal) or self.MAX_ROOM_PRINTERS, 1, self.MAX_ROOM_PRINTERS)
 	local rect, err = self:detectRoomRect()
 	if not rect then
 		return { success = false, error = err }
@@ -936,13 +943,18 @@ function Printers:placeRoomGrid(maxTotal, isCancelled)
 			end
 		end
 	end
+	-- Сервер может удалить «лишние» принтеры с лагом в несколько секунд
+	-- (комнатный лимит). Даём ему время и считаем фактический итог.
+	task.wait(3)
+	local roomTotal = self:countPlaced({ folder = rect.folder })
 	return {
 		success = placed > 0,
 		placed = placed,
 		failed = failed,
 		cells = #cells,
 		start_side = startSide,
-		room_total = self:countPlaced({ folder = rect.folder }),
+		room_total = roomTotal,
+		trimmed_by_server = roomTotal < placed,
 	}
 end
 

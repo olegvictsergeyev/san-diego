@@ -2135,7 +2135,7 @@ function CommandEngine:_deployPrintersCommand()
 			placed_before = self.printers:countPlaced(room),
 			redeployed = false,
 		}
-		if out.inventory > 0 and out.placed_before < self.printers.MAX_BUY then
+		if out.inventory > 0 and out.placed_before < self.printers.MAX_ROOM_PRINTERS then
 			if out.placed_before > 0 then
 				local pu = self.printers:pickupAllPrinters(isCancelled)
 				if not pu.success then
@@ -2144,7 +2144,7 @@ function CommandEngine:_deployPrintersCommand()
 				end
 				out.picked = pu.picked
 			end
-			local pg = self.printers:placeRoomGrid(self.printers.MAX_BUY, isCancelled)
+			local pg = self.printers:placeRoomGrid(self.printers.MAX_ROOM_PRINTERS, isCancelled)
 			if not pg.success then
 				out.error = "place failed: " .. tostring(pg.error)
 				out.attempts_log = pg.attempts_log
