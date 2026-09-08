@@ -294,7 +294,7 @@ function CommandEngine:getCommandsSpec()
 				skip_in_spawn = {
 					type = "boolean",
 					required = false,
-					description = "true = не респавниться, если персонаж уже в зоне спавна (его TeamColor или Neutral SpawnLocation, до 6 ст от края площадки); возвращает успех с respawned=false, skipped=true",
+					description = "true = не респавниться, если персонаж уже в зоне спавна (его TeamColor или Neutral SpawnLocation, до 12 ст от края площадки); возвращает успех с respawned=false, skipped=true",
 				},
 			},
 		},
@@ -1406,7 +1406,7 @@ function CommandEngine:_pause(payload)
 end
 
 -- Зона спавна: включённые SpawnLocation игрока (его TeamColor или
--- Neutral) рядом с персонажем — по XZ в пределах полуплощадки + 6 ст,
+-- Neutral) рядом с персонажем — по XZ в пределах полуплощадки + 12 ст,
 -- по высоте от -5 до +8 от площадки. Возвращает inZone, spawnName.
 function CommandEngine:_isInSpawnZone()
 	local hrp = self:_getHrp()
@@ -1435,8 +1435,8 @@ function CommandEngine:_isInSpawnZone()
 					local dx = math.abs(pos.X - inst.Position.X)
 					local dz = math.abs(pos.Z - inst.Position.Z)
 					local dy = pos.Y - inst.Position.Y
-					if dx <= inst.Size.X / 2 + 6
-						and dz <= inst.Size.Z / 2 + 6
+					if dx <= inst.Size.X / 2 + 12
+						and dz <= inst.Size.Z / 2 + 12
 						and dy >= -5 and dy <= 8
 					then
 						return true, inst.Name, nil
@@ -1459,8 +1459,8 @@ function CommandEngine:_isInSpawnZone()
 					dx = math.floor(dx * 10) / 10,
 					dz = math.floor(dz * 10) / 10,
 					dy = math.floor(dy * 10) / 10,
-					need_dx = math.floor((nearest.Size.X / 2 + 6) * 10) / 10,
-					need_dz = math.floor((nearest.Size.Z / 2 + 6) * 10) / 10,
+					need_dx = math.floor((nearest.Size.X / 2 + 12) * 10) / 10,
+					need_dz = math.floor((nearest.Size.Z / 2 + 12) * 10) / 10,
 					dist_xz = math.floor(nearestDist * 10) / 10,
 				},
 			}
