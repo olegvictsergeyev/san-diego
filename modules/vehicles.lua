@@ -478,8 +478,12 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance)
 		self:_teardown()
 		return { success = true, data = { aligned = true, lane_z = laneZ, position = math.floor(root.Position.X), target_vmax = targetVmax } }
 	end
-	-- ФАЗА 1: полный разгон + пробег + резкое торможение у цели
-	local ACCEL, BRAKE_CMD, BRAKE_REAL = 60, 80, 65
+	-- ФАЗА 1: разгон + пробег + резкое торможение у цели.
+	-- Разгон масштабируется от speedLevel: иначе у speed 7 и speed 10
+	-- первые ~5.5 с (0→300 ст/с) идентичны — кажется, что ограничение
+	-- скорости игнорируется (наблюдено вживую). Торможение НЕ трогаем:
+	-- дистанция остановки считается по фиксированному BRAKE_REAL.
+	local ACCEL, BRAKE_CMD, BRAKE_REAL = 60 * math.max(speedLevel, 1) / 10, 80, 65
 	local v, phase = 0, "accel"
 	local vmax, t300 = 0, nil
 	local stuckAt, stuckDist = tick(), math.huge
