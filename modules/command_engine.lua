@@ -983,6 +983,7 @@ function CommandEngine:_moveAxis(axis, payload)
 	end
 
 	local blockedReason = nil
+	local rollbacks = 0
 	for _ = 1, steps do
 		if self:_isCancelled() then
 			return { success = false, error = "cancelled" }
@@ -1009,6 +1010,28 @@ function CommandEngine:_moveAxis(axis, payload)
 			return { success = false, error = "HumanoidRootPart lost during movement" }
 		end
 		task.wait(waitTime)
+		-- Детект античита (AntiTp): сервер откатывает телепорт — фактическая
+		-- позиция не совпадает с командной. По горизонтали (по Y падение
+		-- законно). 3 отката подряд ≥2.5 ст → прерываем команду с error.
+		if axis ~= "y" then
+			local hrpNow = self:_getHrp()
+			if hrpNow then
+				local ddx = hrpNow.Position.X - newPos.X
+				local ddz = hrpNow.Position.Z - newPos.Z
+				local dev = math.sqrt(ddx * ddx + ddz * ddz)
+				if dev > 2.5 then
+					rollbacks = rollbacks + 1
+					if rollbacks >= 3 then
+						return {
+							success = false,
+							error = string.format("antichit: position rollback (deviation %.1f studs, aborted)", dev),
+						}
+					end
+				else
+					rollbacks = 0
+				end
+			end
+		end
 	end
 
 	if self:_isCancelled() then
@@ -1088,6 +1111,7 @@ function CommandEngine:_avoidAround(hrp, targetPos, stepSize, waitTime, setHrpCF
 	local detour = 0
 	local visited = {}
 	local t0 = tick()
+	local rollbacks = 0
 
 	while detour < maxDetour and tick() - t0 < 120 do
 		if self:_isCancelled() then
@@ -1127,6 +1151,21 @@ function CommandEngine:_avoidAround(hrp, targetPos, stepSize, waitTime, setHrpCF
 		end
 		detour = detour + stepSize
 		task.wait(waitTime)
+		-- Детект античита (AntiTp): откат телепорта сервером.
+		local hrpNow = self:_getHrp()
+		if hrpNow then
+			local ddx = hrpNow.Position.X - newPos.X
+			local ddz = hrpNow.Position.Z - newPos.Z
+			local dev = math.sqrt(ddx * ddx + ddz * ddz)
+			if dev > 2.5 then
+				rollbacks = rollbacks + 1
+				if rollbacks >= 3 then
+					return false, string.format("antichit: position rollback (deviation %.1f studs)", dev)
+				end
+			else
+				rollbacks = 0
+			end
+		end
 	end
 	return false, "detour budget exceeded"
 end
@@ -1208,6 +1247,7 @@ function CommandEngine:_moveTo(payload)
 	local bestRemaining = dist
 	local noProgress = 0
 	local blockedReason = nil
+	local rollbacks = 0
 
 	while tick() < deadline do
 		if self:_isCancelled() then
@@ -1238,6 +1278,24 @@ function CommandEngine:_moveTo(payload)
 				return { success = false, error = "HumanoidRootPart lost during movement" }
 			end
 			task.wait(waitTime)
+			-- Детект античита (AntiTp): откат телепорта сервером.
+			local hrpNow = self:_getHrp()
+			if hrpNow then
+				local ddx = hrpNow.Position.X - adjusted.X
+				local ddz = hrpNow.Position.Z - adjusted.Z
+				local dev = math.sqrt(ddx * ddx + ddz * ddz)
+				if dev > 2.5 then
+					rollbacks = rollbacks + 1
+					if rollbacks >= 3 then
+						return {
+							success = false,
+							error = string.format("antichit: position rollback (deviation %.1f studs, aborted)", dev),
+						}
+					end
+				else
+					rollbacks = 0
+				end
+			end
 		else
 			local okAvoid, avoidErr = self:_avoidAround(hrp, Vector3.new(x, p.Y, z), stepSize, waitTime, setHrpCFrame, startYaw)
 			if not okAvoid then
