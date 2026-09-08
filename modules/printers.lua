@@ -786,8 +786,11 @@ end
 -- Ставит один принтер в ячейку: подвод (0.6 с на репликацию), экипировка,
 -- клик, поиск новой модели, сверка bbox с ячейкой (прижат к стене);
 -- при промахе — подбор и повтор, до 3 попыток.
+-- Диагностика: attempts-log с причиной каждой попытки (в error data),
+-- чтобы по результату команды было видно, где именно обрывается цепочка.
 function Printers:_placeCell(rect, cell, isCancelled)
 	local axisX = math.abs(cell.forward.X) > 0.5
+	local attemptsLog = {}
 	for attempt = 1, 3 do
 		if isCancelled and isCancelled() then
 			return { success = false, error = "cancelled" }
@@ -800,9 +803,14 @@ function Printers:_placeCell(rect, cell, isCancelled)
 				existing[c] = true
 			end
 		end
+		local beforeCount = 0
+		for _ in pairs(existing) do
+			beforeCount = beforeCount + 1
+		end
 		local tool = self:_equipPrinter()
 		if not tool then
-			return { success = false, error = "no printer tool left" }
+			table.insert(attemptsLog, string.format("attempt %d: no printer tool left", attempt))
+			return { success = false, error = "no printer tool left", attempts_log = attemptsLog }
 		end
 		task.wait(0.4)
 		self:_clickActivate()
@@ -838,11 +846,39 @@ function Printers:_placeCell(rect, cell, isCancelled)
 				return { success = true }
 			end
 			-- промах (устаревшая позиция/поворот на сервере) — снять и повторить
+			table.insert(attemptsLog, string.format(
+				"attempt %d: model spawned but misplaced (back err %.2f, lateral err %.2f)",
+				attempt, math.abs(backCoord - expectedBack), lateralErr))
 			self:_pickupOne(newModel, isCancelled)
 			task.wait(0.5)
+		else
+			-- модель не появилась: сервер отклонил постановку. Уточняем причину.
+			local note = string.format("attempt %d: no model after 4s (folder had %d)", attempt, beforeCount)
+			local hrp = self:_player().Character and self:_player().Character:FindFirstChild("HumanoidRootPart")
+			if hrp then
+				note = note .. string.format(", char at (%.1f, %.1f, %.1f)", hrp.Position.X, hrp.Position.Y, hrp.Position.Z)
+				local dev = math.sqrt((hrp.Position.X - cell.charX) ^ 2 + (hrp.Position.Z - cell.charZ) ^ 2)
+				if dev > 1.5 then
+					note = note .. string.format(" — POSITION REVERTED (dev %.1f studs from cell)", dev)
+				end
+			end
+			local hum = self:_player().Character and self:_player().Character:FindFirstChildOfClass("Humanoid")
+			if hum and hum:GetState() == Enum.HumanoidStateType.Dead then
+				note = note .. " — HUMANOID DEAD"
+			end
+			-- инструмент остался в руке? (клик мог уйти в UI вместо мира)
+			local held = nil
+			for _, c in ipairs(self:_player().Character:GetChildren()) do
+				if self:_isPrinterTool(c) then
+					held = c.Name
+					break
+				end
+			end
+			note = note .. (held and (", tool still held: " .. held) or ", tool GONE (consumed/returned)")
+			table.insert(attemptsLog, note)
 		end
 	end
-	return { success = false, error = "placement failed after retries" }
+	return { success = false, error = "placement failed after retries", attempts_log = attemptsLog }
 end
 
 -- Раскладывает до maxTotal принтеров сеткой по комнате персонажа.
@@ -896,7 +932,7 @@ function Printers:placeRoomGrid(maxTotal, isCancelled)
 			end
 			failed = failed + 1
 			if placed + failed == 1 then
-				return { success = false, error = res.error, placed = 0, failed = failed }
+				return { success = false, error = res.error, placed = 0, failed = failed, attempts_log = res.attempts_log }
 			end
 		end
 	end

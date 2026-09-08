@@ -2147,6 +2147,7 @@ function CommandEngine:_deployPrintersCommand()
 			local pg = self.printers:placeRoomGrid(self.printers.MAX_BUY, isCancelled)
 			if not pg.success then
 				out.error = "place failed: " .. tostring(pg.error)
+				out.attempts_log = pg.attempts_log
 				return { success = false, error = out.error, data = out }
 			end
 			out.redeployed = true
