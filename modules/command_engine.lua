@@ -884,7 +884,29 @@ function CommandEngine:_adjustStep(currentPos, targetPos)
 			if clearance and clearance <= 12.5 then
 				targetPos = Vector3.new(targetPos.X, currentPos.Y + clearance + 0.4, targetPos.Z)
 			else
-				return nil, "blocked: " .. hit.Instance.Name
+				-- Высокое препятствие. Если оно ТОНКОЕ (забор, ограждение,
+				-- перегородка) — за точкой попадания на уровне колена свободно:
+				-- тогда это проходимый барьер, а не стена. Приземляемся за ним
+				-- на уровне земли с проверкой габарита над головой. Толстые
+				-- стены/здания проходу не поддаются — честный обход выше.
+				local past = workspace:Raycast(hit.Position + dir * 0.3, dir * 2.5, params)
+				if not past then
+					local landing = currentPos + dir * (dist + 2)
+					local down = workspace:Raycast(landing + Vector3.new(0, 5, 0), Vector3.new(0, -60, 0), params)
+					if down then
+						local landHrpY = down.Position.Y + 3.2
+						local head = workspace:Raycast(Vector3.new(landing.X, landHrpY - 0.5, landing.Z), Vector3.new(0, 5.5, 0), params)
+						if not head then
+							targetPos = Vector3.new(landing.X, landHrpY, landing.Z)
+						else
+							return nil, "blocked: " .. hit.Instance.Name
+						end
+					else
+						return nil, "blocked: " .. hit.Instance.Name
+					end
+				else
+					return nil, "blocked: " .. hit.Instance.Name
+				end
 			end
 		end
 	end
