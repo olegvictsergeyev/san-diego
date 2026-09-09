@@ -110,6 +110,18 @@ function Agent:_log(level, ...)
 end
 
 function Agent:_sendStatus(force)
+	-- Диагностика AFK в каждый статус: после кика 278 по afk_* полям
+	-- видно, работал ли анти-AFK и когда последний раз был реальный ввод.
+	if self.afk and self.afk.getDiag then
+		local okDiag, diag = pcall(function()
+			return self.afk:getDiag()
+		end)
+		if okDiag and typeof(diag) == "table" then
+			for k, v in pairs(diag) do
+				self.config.customData[k] = v
+			end
+		end
+	end
 	local data = self.state:getAll(self.config.customData)
 	-- Для сравнения исключаем time_1..time_5: это «прошло секунд с таймера»,
 	-- значения меняются каждую секунду и иначе форсируют отправку каждый тик

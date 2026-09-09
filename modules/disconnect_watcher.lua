@@ -89,6 +89,49 @@ function DisconnectWatcher:_onPromptShown()
 			self.agent:reportError(info)
 		end)
 	end
+
+	-- Авто-переподключение при 277/278: это сетевой обрыв/idle-кик, а не
+	-- управляемый бэкендом переход. Ждём внешних команд бессмысленно —
+	-- клиент сидит на ErrorPrompt, и пока его не перезапустят, фарм мёртв.
+	-- Телепортимся обратно на ТОТ ЖЕ инстанс (jobId ещё читается), дальше
+	-- срабатывает штатный queue_on_teleport и поднимает агента.
+	if info.code == "277" or info.code == "278" then
+		self:_scheduleReconnect(info)
+	end
+end
+
+-- До 3 попыток с бэкофом; каждая — только если ErrorPrompt всё ещё висит
+-- (если промпт исчез — переподключение уже состоялось другим путём).
+function DisconnectWatcher:_scheduleReconnect(info)
+	task.spawn(function()
+		local Players = game:GetService("Players")
+		local delays = {10, 60, 180}
+		for attempt = 1, #delays do
+			task.wait(delays[attempt])
+			if self.agent and self.agent.running == false then
+				self:_log("agent stopped by user, reconnect cancelled")
+				return
+			end
+			if not self:_getErrorPrompt() then
+				self:_log("ErrorPrompt gone, reconnect not needed")
+				return
+			end
+			local ok, err = pcall(function()
+				local TeleportService = game:GetService("TeleportService")
+				local placeId = game.PlaceId
+				local jobId = tostring(game.JobId or "")
+				if jobId == "" then
+					error("empty JobId, cannot reconnect to same instance")
+				end
+				self:_log("auto-reconnect attempt", attempt, "to place", tostring(placeId), "job", jobId)
+				TeleportService:TeleportToPlaceInstance(placeId, jobId, Players.LocalPlayer)
+			end)
+			if not ok then
+				self:_log("reconnect attempt", attempt, "failed:", tostring(err))
+			end
+		end
+		self:_log("all reconnect attempts exhausted; leaving prompt for backend/user")
+	end)
 end
 
 function DisconnectWatcher:_watchExisting()

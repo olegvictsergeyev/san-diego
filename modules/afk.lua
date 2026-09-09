@@ -92,11 +92,26 @@ function Afk:_shortestAngleDiff(current, target)
 	return math.atan2(math.sin(diff), math.cos(diff))
 end
 
--- Имитация активности: клик через VirtualUser + прыжок.
--- Этот подход совместим с защитой от AFK в San Diego.
+-- Имитация активности. Два канала, два разных потребителя:
+-- 1) РЕАЛЬНЫЙ ввод через VirtualInputManager: именно он сбрасывает
+--    idle-таймер Roblox (20 мин без ввода → кик «Error code: 278»).
+--    VirtualUser НЕ считается вводом — из-за этого кикало персонажей
+--    в ночные простои. Канал тот же, что у кликов постановки принтеров
+--    (проверен на Xeno/Delta, включая мобильные клиенты). Клик в угол
+--    (2,2) — минимальный риск задеть игровой GUI.
+-- 2) VirtualUser + прыжок — для собственной защиты от AFK San Diego.
 -- ВАЖНО: в машине (VehicleSeat) прыжок и Sit=false выкинули бы персонажа
--- из сиденья — там ограничиваемся кликом VirtualUser.
+-- из сиденья — там ограничиваемся кликами.
 function Afk:_simulateActivity()
+	local okVim = pcall(function()
+		local vim = game:GetService("VirtualInputManager")
+		vim:SendMouseButtonEvent(2, 2, 0, true, game, 0)
+		task.wait(0.05)
+		vim:SendMouseButtonEvent(2, 2, 0, false, game, 0)
+	end)
+	self.lastActionAt = tick()
+	self.lastActionOk = okVim
+
 	local VirtualUser = game:GetService("VirtualUser")
 	pcall(function()
 		VirtualUser:CaptureController()
@@ -148,8 +163,29 @@ function Afk:_performAction()
 		self:_simulateActivity()
 	end)
 	if not ok then
+		self.lastActionOk = false
+		self.lastActionError = tostring(err)
 		warn("[SanDiegoAgent][AFK] action failed:", tostring(err))
 	end
+end
+
+-- Диагностика для heartbeat: после кика 278 по этим полям видно,
+-- работал ли AFK и когда последний раз дёргал реальный ввод.
+function Afk:getDiag()
+	local diag = {
+		afk_enabled = self.enabled,
+		afk_interval = self.interval,
+	}
+	if self.lastActionAt then
+		diag.afk_last_action_s_ago = math.floor(tick() - self.lastActionAt)
+		diag.afk_last_ok = self.lastActionOk == true
+		if self.lastActionError then
+			diag.afk_last_error = self.lastActionError
+		end
+	else
+		diag.afk_last_action_s_ago = -1
+	end
+	return diag
 end
 
 function Afk:start()
