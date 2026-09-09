@@ -52,7 +52,8 @@ function DisconnectWatcher:_readErrorInfo()
 	local message = self:_readText(prompt, { "MessageArea", "ErrorFrame", "ErrorMessage" })
 	local code = nil
 	if message then
-		code = message:match("%(Error Code:%s*(%d+)%)")
+		-- Case-insensitive: встречались варианты написания "Error code:".
+		code = message:lower():match("%(error code:%s*(%d+)%)")
 	end
 	return {
 		title = title,
@@ -77,8 +78,19 @@ function DisconnectWatcher:_onPromptShown()
 
 	self.handled = true
 
-	local info = self:_readErrorInfo()
-	if not info then
+	-- Текст промпта может отрисоваться позже самого инстанса: если сразу
+	-- не прочиталось — повторяем, а не сдаёмся. Ранний return с
+	-- handled=true навсегда отключал и репорт, и авто-переподключение.
+	local info
+	for attempt = 1, 10 do
+		info = self:_readErrorInfo()
+		if info and (info.title or info.message) then
+			break
+		end
+		task.wait(0.5)
+	end
+	if not info or not (info.title or info.message) then
+		self:_log("could not read ErrorPrompt content after retries")
 		return
 	end
 
@@ -93,45 +105,96 @@ function DisconnectWatcher:_onPromptShown()
 	-- Авто-переподключение при 277/278: это сетевой обрыв/idle-кик, а не
 	-- управляемый бэкендом переход. Ждём внешних команд бессмысленно —
 	-- клиент сидит на ErrorPrompt, и пока его не перезапустят, фарм мёртв.
-	-- Телепортимся обратно на ТОТ ЖЕ инстанс (jobId ещё читается), дальше
-	-- срабатывает штатный queue_on_teleport и поднимает агента.
+	-- Лестница восстановления: ReconnectButton (реджойн на тот же инстанс,
+	-- повторы с бэкофом на случай 773) → Teleport(placeId) на любой
+	-- инстанс как последний шаг — оживляет клиента, бэкенд затем шлёт
+	-- join_private_server и возвращает на ферму.
 	if info.code == "277" or info.code == "278" then
 		self:_scheduleReconnect(info)
 	end
 end
 
--- До 3 попыток с бэкофом; каждая — только если ErrorPrompt всё ещё висит
--- (если промпт исчез — переподключение уже состоялось другим путём).
+-- Лестница восстановления (все шаги проверены на живом клиенте
+-- 09.09.2026, pid 22488, кик 278):
+-- 1) ReconnectButton (через getconnections Activated) — реально инициирует
+--    реджойн на тот же инстанс, но сервер может ответить 773 «Reconnect was
+--    unsuccessful» (инстанс мёртв/полон/сессия призрак) — повторяем с бэкофом.
+-- 2) Teleport(placeId) на любой инстанс — срабатывает даже с повисшего
+--    ErrorPrompt и оживляет клиента; дальше бэкенд штатной командой
+--    join_private_server возвращает его на ферму.
+-- ВАЖНО: TeleportToPlaceInstance на ТОТ ЖЕ jobId из состояния дисконнекта —
+-- тихий no-op (3 попытки подряд, промпт остался): НЕ использовать.
 function DisconnectWatcher:_scheduleReconnect(info)
 	task.spawn(function()
 		local Players = game:GetService("Players")
-		local delays = {10, 60, 180}
-		for attempt = 1, #delays do
-			task.wait(delays[attempt])
+		local steps = {
+			{ delay = 10, action = "reconnect_button" },
+			{ delay = 30, action = "reconnect_button" },
+			{ delay = 60, action = "reconnect_button" },
+			{ delay = 30, action = "teleport_place" },
+		}
+		for i, step in ipairs(steps) do
+			task.wait(step.delay)
 			if self.agent and self.agent.running == false then
 				self:_log("agent stopped by user, reconnect cancelled")
 				return
 			end
-			if not self:_getErrorPrompt() then
+			local prompt = self:_getErrorPrompt()
+			if not prompt then
 				self:_log("ErrorPrompt gone, reconnect not needed")
 				return
 			end
-			local ok, err = pcall(function()
-				local TeleportService = game:GetService("TeleportService")
-				local placeId = game.PlaceId
-				local jobId = tostring(game.JobId or "")
-				if jobId == "" then
-					error("empty JobId, cannot reconnect to same instance")
+			local current = self:_readErrorInfo()
+			if step.action == "reconnect_button" then
+				self:_log("auto-reconnect step", i, "firing ReconnectButton, prompt code", tostring(current and current.code))
+				self:_fireReconnectButton(prompt)
+			else
+				local ok, err = pcall(function()
+					local TeleportService = game:GetService("TeleportService")
+					self:_log("auto-reconnect step", i, "teleporting to place", tostring(game.PlaceId))
+					TeleportService:Teleport(game.PlaceId, Players.LocalPlayer)
+				end)
+				if not ok then
+					self:_log("teleport to place failed:", tostring(err))
 				end
-				self:_log("auto-reconnect attempt", attempt, "to place", tostring(placeId), "job", jobId)
-				TeleportService:TeleportToPlaceInstance(placeId, jobId, Players.LocalPlayer)
-			end)
-			if not ok then
-				self:_log("reconnect attempt", attempt, "failed:", tostring(err))
 			end
 		end
-		self:_log("all reconnect attempts exhausted; leaving prompt for backend/user")
+		self:_log("reconnect ladder exhausted; leaving prompt for backend/user")
 	end)
+end
+
+-- Клик по системной кнопке Reconnect: через getconnections + pcall, обработчик
+-- — в task.spawn (правило §4 AGENTS.md). Кнопка — ImageButton (Text нет).
+function DisconnectWatcher:_fireReconnectButton(prompt)
+	local ok, err = pcall(function()
+		local area = prompt:FindFirstChild("MessageArea")
+		local frame = area and area:FindFirstChild("ErrorFrame")
+		local buttons = frame and frame:FindFirstChild("ButtonArea")
+		local btn = buttons and buttons:FindFirstChild("ReconnectButton")
+		if not btn then
+			error("ReconnectButton not found")
+		end
+		local conns = {}
+		local okConns, res = pcall(function()
+			return getconnections(btn.Activated)
+		end)
+		if okConns and typeof(res) == "table" then
+			conns = res
+		end
+		if #conns == 0 then
+			error("no getconnections for ReconnectButton.Activated")
+		end
+		task.spawn(function()
+			for _, c in ipairs(conns) do
+				pcall(function()
+					c:Fire()
+				end)
+			end
+		end)
+	end)
+	if not ok then
+		self:_log("fire ReconnectButton failed:", tostring(err))
+	end
 end
 
 function DisconnectWatcher:_watchExisting()
