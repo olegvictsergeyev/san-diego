@@ -23,7 +23,21 @@ function HttpClient.new(baseUrl, timeout)
 	local self = setmetatable({}, HttpClient)
 	self.baseUrl = baseUrl
 	self.timeout = timeout or 60
+	-- Диагностика транспортных сбоев для heartbeat: стрик и последняя
+	-- ошибка видны на бэкенде до потери клиента (см. Agent:_getLivenessDiag).
+	self.failStreak = 0
+	self.totalFails = 0
+	self.lastError = nil
 	return self
+end
+
+-- Снимок диагностики для /game/update (custom_data).
+function HttpClient:getDiag()
+	return {
+		http_fail_streak = self.failStreak,
+		http_total_fails = self.totalFails,
+		http_last_error = self.lastError and self.lastError:sub(1, 200) or nil,
+	}
 end
 
 function HttpClient:_getRequestFunction()
@@ -109,13 +123,19 @@ function HttpClient:request(method, path, body, headers, query)
 		task.wait(0.5)
 	end
 	if not done then
-		return false, "request timeout after " .. tostring(self.timeout) .. "s: " .. tostring(method) .. " " .. tostring(path)
+		self.failStreak += 1
+		self.totalFails += 1
+		self.lastError = "request timeout after " .. tostring(self.timeout) .. "s: " .. tostring(method) .. " " .. tostring(path)
+		return false, self.lastError
 	end
 
 	local ok, res = threadResult.ok, threadResult.res
 
 	if not ok then
-		return false, tostring(res)
+		self.failStreak += 1
+		self.totalFails += 1
+		self.lastError = tostring(res)
+		return false, self.lastError
 	end
 
 	local parsedBody
@@ -130,6 +150,7 @@ function HttpClient:request(method, path, body, headers, query)
 		end
 	end
 
+	self.failStreak = 0
 	return true, {
 		statusCode = res.StatusCode,
 		body = parsedBody,

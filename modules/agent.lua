@@ -94,6 +94,11 @@ function Agent.new(config, httpClient, stateCollector, commandEngine, afk, resul
 
 	self.lastCommandFinishedAt = 0
 
+	-- Метки liveness-диагностики (uptime, FPS) — см. _getLivenessDiag.
+	self.startedAt = tick()
+	self.fpsAcc = { frames = 0, dtSum = 0, maxDt = 0, windowStarted = tick(), lastAvg = nil, lastMin = nil }
+	self._prevLogTailConsumed = false
+
 	return self
 end
 
@@ -106,7 +111,127 @@ end
 
 function Agent:_log(level, ...)
 	local msg = table.concat({ ... }, " ")
-	print(string.format("[SanDiegoAgent][%s] %s", level, msg))
+	local line = string.format("[SanDiegoAgent][%s] %s", level, msg)
+	print(line)
+	self:_writeLocalLog(line)
+end
+
+local LOG_MAX_BYTES = 64 * 1024
+
+-- Liveness-поля для /game/update: видно деградацию клиента (просадка FPS,
+-- рост памяти, стек транспортных ошибок HTTP) до молчания агента.
+function Agent:_getLivenessDiag()
+	local diag = {
+		agent_uptime_s = math.floor(tick() - (self.startedAt or tick())),
+		mem_kb = gcinfo(),
+	}
+	local acc = self.fpsAcc
+	if acc then
+		if acc.lastAvg then
+			diag.fps_avg_60s = math.floor(acc.lastAvg + 0.5)
+		end
+		if acc.lastMin then
+			diag.fps_min_60s = math.floor(acc.lastMin + 0.5)
+		end
+	end
+	if self.http and self.http.getDiag then
+		local okHttp, httpDiag = pcall(function()
+			return self.http:getDiag()
+		end)
+		if okHttp and typeof(httpDiag) == "table" then
+			for k, v in pairs(httpDiag) do
+				diag[k] = v
+			end
+		end
+	end
+	-- Постмортем прошлой сессии: разово отправляем хвост локального лога.
+	local tail = self:_consumePrevLogTail()
+	if tail then
+		diag.prev_log_tail = tail
+	end
+	return diag
+end
+
+-- Локальный ринг-лог событий агента: при жёстком зависании клиента (когда
+-- ни один запрос до бэкенда уже не доходит) файл остаётся на машине, а после
+-- перезапуска его хвост уходит в prev_log_tail — постмортем без доступа
+-- к машине. Ротация: держим последние ~64 КБ.
+function Agent:_writeLocalLog(line)
+	local compat = self.config and self.config.compat
+	if not compat or not compat.writeFile then
+		return
+	end
+	pcall(function()
+		compat.makeFolder("SanDiegoAgent")
+		local path = "SanDiegoAgent/log-" .. self:_logNick() .. ".txt"
+		local okRead, existing = compat.readFile(path)
+		if not okRead or typeof(existing) ~= "string" then
+			existing = ""
+		end
+		local stamp = ""
+		pcall(function()
+			stamp = os.date("%m-%d %H:%M:%S")
+		end)
+		local newContent = existing .. "\n" .. stamp .. " " .. line
+		if #newContent > LOG_MAX_BYTES then
+			newContent = newContent:sub(-LOG_MAX_BYTES)
+		end
+		compat.writeFile(path, newContent)
+	end)
+end
+
+-- Ник для имени лог-файла. До первого получения ника — "unknown".
+function Agent:_logNick()
+	if self.state and self.state.getNickname then
+		local okNick, n = pcall(function()
+			return self.state:getNickname()
+		end)
+		if okNick and typeof(n) == "string" and n ~= "" and n ~= "unknown" then
+			return n
+		end
+	end
+	return "unknown"
+end
+
+-- Читает и очищает локальный лог прошлой сессии (постмортем). Возвращает
+-- хвост (до ~2000 символов) или nil. Срабатывает раз за жизнь инстанса;
+-- при телепорте модуль перезагружается — лог забирается повторно (теряется
+-- история до телепорта, хвост уходит в custom_data ещё раз — безвредно).
+function Agent:_consumePrevLogTail()
+	if self._prevLogTailConsumed then
+		return nil
+	end
+	local compat = self.config and self.config.compat
+	if not compat or not compat.readFile or not compat.isFile then
+		return nil
+	end
+	-- До получения ника не забираем: иначе прочитаем log-unknown.txt
+	-- вместо реального лога сессии. Флаг не ставим — повторим на
+	-- следующих отправках статуса, когда ник станет известен.
+	local nick = self:_logNick()
+	if nick == "unknown" then
+		return nil
+	end
+	self._prevLogTailConsumed = true
+	local ok, tail = pcall(function()
+		local path = "SanDiegoAgent/log-" .. nick .. ".txt"
+		local okIs, isLog = compat.isFile(path)
+		if not okIs or not isLog then
+			return nil
+		end
+		local okRead, content = compat.readFile(path)
+		if not okRead or typeof(content) ~= "string" or #content == 0 then
+			return nil
+		end
+		if compat.writeFile then
+			compat.writeFile(path, "") -- забираем лог, дальше пишется заново
+		end
+		return content:sub(-2000)
+	end)
+	if ok then
+		return tail
+	end
+	return nil
 end
 
 function Agent:_sendStatus(force)
@@ -120,6 +245,16 @@ function Agent:_sendStatus(force)
 			for k, v in pairs(diag) do
 				self.config.customData[k] = v
 			end
+		end
+	end
+	-- Liveness-диагностика: uptime/FPS/память/HTTP-стики — чтобы на бэкенде
+	-- видеть деградацию клиента ДО его потери (зависания фермы 11.09.2026).
+	local okLive, liveDiag = pcall(function()
+		return self:_getLivenessDiag()
+	end)
+	if okLive and typeof(liveDiag) == "table" then
+		for k, v in pairs(liveDiag) do
+			self.config.customData[k] = v
 		end
 	end
 	local data = self.state:getAll(self.config.customData)
@@ -745,6 +880,29 @@ function Agent:start()
 	self:_log("INFO", "starting agent for game", self.config.gameSlug)
 	self._lastFetchActivity = tick()
 	self._lastSelfRestart = 0
+
+	-- FPS-аккумулятор для heartbeat-диагностики: окно 60 с, Heartbeat дёшев.
+	pcall(function()
+		game:GetService("RunService").Heartbeat:Connect(function(dt)
+			local acc = self.fpsAcc
+			if not acc then
+				return
+			end
+			acc.frames += 1
+			acc.dtSum += dt
+			if dt > acc.maxDt then
+				acc.maxDt = dt
+			end
+			if tick() - acc.windowStarted >= 60 then
+				acc.lastAvg = acc.frames / math.max(acc.dtSum, 1e-6)
+				acc.lastMin = acc.maxDt > 0 and (1 / acc.maxDt) or nil
+				acc.frames = 0
+				acc.dtSum = 0
+				acc.maxDt = 0
+				acc.windowStarted = tick()
+			end
+		end)
+	end)
 
 	self:_sendStatus()
 

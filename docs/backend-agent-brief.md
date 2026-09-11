@@ -45,6 +45,11 @@ Tracked-поля для игры `san-diego`:
 - `district` (string) — район карты по `workspace.Map.Static.Locations`: `SanDiego` (город, x −1531…709), `Border` (погранполоса, x 2430…2775), `OldTown` (x 3486…7402); `unknown` — вне зон.
 - `poi` (string) — ближайшая именованная точка из `workspace.Nodes.Waypoints` (Bank, GunStore, BlackMarket, ElCapo, Apartments, Docks, Warehouse, Gym, Petrol и др., ~24 шт.); пустая строка, если точки недоступны.
 - `poi_dist` (number) — дистанция до ближайшего POI по XZ в стадах; `-1`, если недоступно.
+- `agent_uptime_s` (number) — аптайм инстанса агента, сек.
+- `mem_kb` (number) — память Luau (`gcinfo()`), КБ.
+- `fps_avg_60s`, `fps_min_60s` (number) — средний и минимальный FPS за последнее окно 60 с; появляются после первой минуты работы.
+- `http_fail_streak`, `http_total_fails` (number), `http_last_error` (string) — транспортные сбои HTTP-стека агента (таймауты/обрывы). Растущий стрик до молчания — маркер деградации сети/клиента.
+- `prev_log_tail` (string) — разово при старте: хвост (до ~2000 символов) локального лога прошлой сессии. Постмортем жёстких зависаний: если клиент умер без дисконнект-сигнала, последние события прошлой сессии приходят при перезапуске.
 
 ## Переподключение после дисконнекта
 
