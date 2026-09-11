@@ -111,7 +111,41 @@ function DisconnectWatcher:_onPromptShown()
 	-- join_private_server и возвращает на ферму.
 	if info.code == "277" or info.code == "278" then
 		self:_scheduleReconnect(info)
+	elseif info.code == "288" then
+		-- Сервер закрыт: реджойн на тот же инстанс невозможен в принципе —
+		-- сразу оживляем клиент телепортом на любой инстанс.
+		self:_scheduleRevive(info)
 	end
+end
+
+-- Оживление при 288 «The server has shut down» (проверено: 10 персонажей
+-- потеряли сервер s1 одновременно 11.09.2026). ReconnectButton бесполезен
+-- (целевого инстанса нет), работает только Teleport(placeId) — дальше
+-- бэкенд штатной командой join_private_server возвращает на ферму.
+function DisconnectWatcher:_scheduleRevive(info)
+	task.spawn(function()
+		local Players = game:GetService("Players")
+		for _, delay in ipairs({10, 60}) do
+			task.wait(delay)
+			if self.agent and self.agent.running == false then
+				self:_log("agent stopped by user, revive cancelled")
+				return
+			end
+			if not self:_getErrorPrompt() then
+				self:_log("ErrorPrompt gone, revive not needed")
+				return
+			end
+			local ok, err = pcall(function()
+				local TeleportService = game:GetService("TeleportService")
+				self:_log("revive attempt: teleporting to place", tostring(game.PlaceId))
+				TeleportService:Teleport(game.PlaceId, Players.LocalPlayer)
+			end)
+			if not ok then
+				self:_log("revive teleport failed:", tostring(err))
+			end
+		end
+		self:_log("revive attempts exhausted; leaving prompt for backend/user")
+	end)
 end
 
 -- Лестница восстановления (все шаги проверены на живом клиенте
