@@ -362,7 +362,7 @@ function CommandEngine:getCommandsSpec()
 		},
 		{
 			name = "transfer_money_via_respawn",
-			description = "Передавать деньги целевому игроку через respawn, пока его баланс не достигнет заданной суммы",
+			description = "Передавать деньги целевому игроку через respawn, пока его баланс не достигнет заданной суммы. Если max_attempts исчерпаны раньше — возвращается ошибка max attempts reached с data.partial=true и прогрессом: это промежуточный результат, бэкенд перевыпускает ту же команду (с тем же payload) до достижения amount",
 			params = {
 				identifier = {
 					type = "string",
@@ -1870,15 +1870,22 @@ function CommandEngine:_transferMoneyViaRespawn(payload)
 		task.wait(waitSeconds)
 	end
 
+	-- Исчерпаны попытки без достижения цели: возвращаем промежуточный результат.
+	-- data.partial: true — контракт с RBT (письмо 2026-09-11): бэкенд перевыпускает ту же команду,
+	-- а не считает выполнение failed. Повторный запуск безопасен: цикл начинается с текущего баланса.
+	-- ВАЖНО: на wire уходит JSON только отсюда (data + error), верхнеуровневые поля результата
+	-- не сериализуются (см. Agent:_resultToString) — маркер держим внутри data.
 	return {
 		success = false,
 		error = "max attempts reached",
 		data = {
+			partial = true,
 			target_user_id = targetPlayer.UserId,
 			target_name = targetPlayer.Name,
 			attempts = attempts,
 			final_balance = lastBalance,
 			target_amount = amount,
+			progress = (typeof(lastBalance) == "number" and amount > 0) and math.clamp(lastBalance / amount, 0, 1) or nil,
 		},
 	}
 end
