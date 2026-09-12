@@ -29,6 +29,14 @@ Vehicles.MAX_DRIVE_DIST = 20000
 -- обнулил скорость и откатил на точку нарушения (rewind).
 -- Кап 580 = максимум проверенный чистым заездом (предел 613 −5%).
 Vehicles.DRIVE_VMAX = 580
+-- Режим замера порога античита (probe=true у drive): разгон капами
+-- от PROBE_V0 с шагом PROBE_STEP каждые PROBE_STEP_SEC, пока игровое
+-- уведомление WarningGui не зафиксирует срабатывание. Порог = кап
+-- на момент срабатывания (уходит в result команды → логи бэкенда).
+Vehicles.PROBE_V0 = 150
+Vehicles.PROBE_STEP = 10
+Vehicles.PROBE_STEP_SEC = 2
+Vehicles.PROBE_ACCEL = 30
 -- Допуск прибытия по X по умолчанию: |фактическая X − целевая| больше
 -- этого значения = ошибка missed target. Переопределяется параметром
 -- tolerance команды drive.
@@ -355,7 +363,7 @@ end
 -- катится дальше сама; констрейнты снимаются, импульс не обнуляется.
 -- tolerance — допуск прибытия по X: |факт − цель| > tolerance = ошибка
 -- missed target (по умолчанию ARRIVE_TOLERANCE).
-function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance)
+function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance, probe, isAnticheatTriggered)
 	dx = tonumber(dx) or 0
 	laneZ = tonumber(laneZ) or self.DEFAULT_LANE_Z
 	speedLevel = tonumber(speedLevel) or 10
@@ -375,6 +383,12 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance)
 	if speedLevel == 0 then
 		dx = 0
 	end
+	-- Режим замера: кап наращивается от PROBE_V0 до срабатывания
+	-- античита; speedLevel при этом игнорируется.
+	probe = probe == true
+	local probeVmax = self.PROBE_V0
+	local probeStepAt = 0
+	local probeTriggered, probeTriggerV = false, nil
 	local root, err, model = self:_car()
 	if not root then
 		return { success = false, error = err }
@@ -484,6 +498,10 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance)
 	-- скорости игнорируется (наблюдено вживую). Торможение НЕ трогаем:
 	-- дистанция остановки считается по фиксированному BRAKE_REAL.
 	local ACCEL, BRAKE_CMD, BRAKE_REAL = 60 * math.max(speedLevel, 1) / 10, 80, 65
+	if probe then
+		ACCEL = self.PROBE_ACCEL
+	end
+	local capV = probe and probeVmax or targetVmax
 	local v, phase = 0, "accel"
 	local vmax, t300 = 0, nil
 	local stuckAt, stuckDist = tick(), math.huge
@@ -491,6 +509,10 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance)
 	local jumped, jumpSpeed = false, 0
 	local knockTicks = 0
 	local timeout = math.max(math.abs(dx) / 200 + 40, math.abs(dx) / math.max(targetVmax, 30) * 1.5 + 40)
+	if probe then
+		-- Полный проход по шкале замера + запас на разгон/торможение.
+		timeout = (self.DRIVE_VMAX - self.PROBE_V0) / self.PROBE_STEP * self.PROBE_STEP_SEC + 90
+	end
 	-- Медленные мобилки: тик длиннее номинала, поэтому dt меряем по
 	-- факту — иначе интегратор скорости врёт, а дистанция торможения
 	-- рассчитана по командной скорости → перелёт цели.
@@ -503,6 +525,24 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance)
 		local now = tick()
 		local dtReal = math.min(now - lastTick, 0.5)
 		lastTick = now
+		if probe then
+			-- Шаг наращивания капа или фиксация срабатывания античита.
+			if isAnticheatTriggered and isAnticheatTriggered() then
+				probeTriggered = true
+				probeTriggerV = math.floor(probeVmax)
+				abortReason = "probe: anticheat triggered"
+				phase = "brake"
+			elseif now - probeStepAt >= self.PROBE_STEP_SEC and probeVmax < self.DRIVE_VMAX then
+				probeVmax = math.min(probeVmax + self.PROBE_STEP, self.DRIVE_VMAX)
+				probeStepAt = now
+				capV = probeVmax
+				warn(string.format(
+					"[SanDiegoAgent][Vehicles] probe step: cap=%d actual=%d",
+					probeVmax,
+					math.floor(s.root.AssemblyLinearVelocity.Magnitude)
+				))
+			end
+		end
 		local p = root.Position
 		local gy = self:_groundY(s, p)
 		-- курс и руление: поворот носа к желаемому направлению
@@ -549,7 +589,7 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance)
 			phase = "brake"
 		end
 		if phase == "accel" then
-			v = math.min(v + ACCEL * dtReal, targetVmax)
+			v = math.min(v + ACCEL * dtReal, capV)
 			if not t300 and v >= 300 then
 				t300 = now - t0
 			end
@@ -561,7 +601,7 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance)
 					jumpSpeed = s.root.AssemblyLinearVelocity.Magnitude
 					break
 				end
-			elseif dir * (targetX - p.X) <= (v * v) / (2 * BRAKE_REAL) then
+			elseif not probe and dir * (targetX - p.X) <= (v * v) / (2 * BRAKE_REAL) then
 				phase = "brake"
 				brakeStartX = p.X
 			end
@@ -666,6 +706,12 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance)
 		lane_z = laneZ,
 		time = math.floor((tick() - t0) * 10) / 10,
 	}
+	if probe then
+		data.probe = true
+		data.probe_triggered = probeTriggered
+		data.probe_threshold = probeTriggerV
+		data.probe_cap_reached = math.floor(probeVmax)
+	end
 	-- верификация прибытия: без неё бэкенд цепляет следующие шаги сцена-
 	-- рия от НЕправильной точки — «приехал не туда», а дальше всё ломается
 	local overshoot = (pEnd.X - targetX) * dir
@@ -674,7 +720,7 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance)
 	if t300 then
 		data.t_300 = math.floor(t300 * 10) / 10
 	end
-	if not abortReason and math.abs(overshoot) > tolerance then
+	if not abortReason and not probe and math.abs(overshoot) > tolerance then
 		return { success = false, error = string.format("missed target by %d studs", math.floor(overshoot)), data = data }
 	end
 	if abortReason then

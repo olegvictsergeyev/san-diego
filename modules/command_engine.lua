@@ -574,6 +574,11 @@ function CommandEngine:getCommandsSpec()
 					max = 1000,
 					description = "Допуск прибытия по X в стадах: |фактическая X − целевая| больше допуска = ошибка missed target (по умолчанию 40)",
 				},
+				probe = {
+					type = "boolean",
+					required = false,
+					description = "true = режим замера порога античита: ехать с нарастающим капом скорости (+10 ст/с каждые 2 с, с 150) до срабатывания игрового WarningGui. В result: probe_triggered и probe_threshold (кап на момент срабатывания). ВНИМАНИЕ: замер намеренно провоцирует античит — инфракция на аккаунте; обычная езда не выполняется, speed игнорируется",
+				},
 			},
 		},
 		{
@@ -2279,10 +2284,17 @@ function CommandEngine:_driveCommand(payload)
 	if tolerance ~= nil and (typeof(tolerance) ~= "number" or tolerance < 1 or tolerance > 1000) then
 		return { success = false, error = "tolerance must be a number in [1, 1000]" }
 	end
+	local probe = payload.probe
+	if probe ~= nil and typeof(probe) ~= "boolean" then
+		return { success = false, error = "probe must be a boolean" }
+	end
 	local ok, res = pcall(function()
 		return self.vehicles:drive(x, z, function()
 			return self:_isCancelled()
-		end, speed, jumpOff, tolerance)
+		end, speed, jumpOff, tolerance, probe, function()
+			local guard = self.anticheatGuard
+			return guard ~= nil and guard.isFlagged ~= nil and guard:isFlagged() == true
+		end)
 	end)
 	if not ok then
 		return { success = false, error = tostring(res) }
