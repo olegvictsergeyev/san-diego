@@ -211,22 +211,45 @@ end
 -- Ближайшая дверь, которую игрок имеет право открывать/закрывать:
 -- своя парадная (ApartmentOwnerUserId == UserId) или любая Interior
 -- (совпадает с клиентским GetPromptMode). Возвращает door, distance, error.
+-- Возвращает дверь для переключения. Приоритет: своя парадная дверь
+-- (Front + владелец — мы), затем ближайшая интерьерная. Иначе сценарий
+-- у коридора соседнего номера может цеплять чужую interior-дверь.
 function Apartments:findToggleableDoor(hrp)
 	local player = Players.LocalPlayer
-	local best, bestDist = nil, math.huge
+	local bestOwn, bestOwnDist = nil, math.huge
+	local bestInterior, bestInteriorDist = nil, math.huge
 	for _, door in ipairs(self:_doors()) do
-		local allowed = door:GetAttribute(self.DOOR_KIND_ATTR) == self.DOOR_KIND_INTERIOR
-		if not allowed and player then
-			allowed = door:GetAttribute(self.OWNER_ATTR) == player.UserId
+		local okP, pos = pcall(function()
+			return door:GetPivot().Position
+		end)
+		if okP and pos then
+			local dist = (pos - hrp.Position).Magnitude
+			local isOwnFront = door:GetAttribute(self.DOOR_KIND_ATTR) == self.DOOR_KIND_FRONT
+				and player ~= nil
+				and door:GetAttribute(self.OWNER_ATTR) == player.UserId
+			if isOwnFront and dist < bestOwnDist then
+				bestOwn, bestOwnDist = door, dist
+			elseif door:GetAttribute(self.DOOR_KIND_ATTR) == self.DOOR_KIND_INTERIOR and dist < bestInteriorDist then
+				bestInterior, bestInteriorDist = door, dist
+			end
 		end
-		if allowed then
-			local okP, pos = pcall(function()
-				return door:GetPivot().Position
-			end)
-			if okP and pos then
-				local dist = (pos - hrp.Position).Magnitude
-				if dist < bestDist then
-					best, bestDist = door, dist
+	end
+	local best, bestDist = bestOwn, bestOwnDist
+	if not best then
+		best, bestDist = bestInterior, bestInteriorDist
+	end
+	-- фолбэк: любая своя дверь (на случай нестандартного kind)
+	if not best and player then
+		for _, door in ipairs(self:_doors()) do
+			if door:GetAttribute(self.OWNER_ATTR) == player.UserId then
+				local okP, pos = pcall(function()
+					return door:GetPivot().Position
+				end)
+				if okP and pos then
+					local dist = (pos - hrp.Position).Magnitude
+					if dist < bestDist then
+						best, bestDist = door, dist
+					end
 				end
 			end
 		end
@@ -244,6 +267,28 @@ end
 -- любая Interior (как в клиентском GetPromptMode). Если дверь уже в
 -- целевом состоянии — вызов не делается, возвращается успех (no-op).
 -- Возвращает open — итоговое состояние двери.
+-- Переключает дверь в целевое состояние. Надёжность — главное: сценарий
+-- фермы прерывался на close_door, поэтому:
+-- 1. ApartmentDoorBusy ждём перед КАЖДОЙ попыткой (анимация открытия
+--    после open_door длится дольше старого однократного ожидания, и
+--    toggle по занятой двери сервер молча отклоняет).
+-- 2. Окно верификации 5 с — мобильная репликация атрибутов двери
+--    доходит с заметной задержкой (старое 2.5 с не дожидалось).
+-- 3. Перед закрытием персонаж в проёме отшагивает на 3 ст — дверь,
+--    закрывающаяся «по нему», откатывается или не закрывается вовсе.
+-- 4. После исчерпания попыток — финальная пауза 3 с: состояние может
+--    дойти с опозданием, это не ошибка.
+local function doorBusyWait(door, busyAttr, timeout, isCancelled)
+	local deadline = tick() + timeout
+	while door:GetAttribute(busyAttr) == true and tick() < deadline do
+		if isCancelled and isCancelled() then
+			return false
+		end
+		task.wait(0.2)
+	end
+	return door:GetAttribute(busyAttr) ~= true
+end
+
 function Apartments:setDoorOpen(targetOpen, isCancelled)
 	local player = Players.LocalPlayer
 	if not player then
@@ -271,13 +316,25 @@ function Apartments:setDoorOpen(targetOpen, isCancelled)
 		door_distance = math.floor(dist * 10) / 10,
 	}
 
-	if dist > self.MAX_DOOR_DISTANCE then
-		data.open = door:GetAttribute(self.DOOR_OPEN_ATTR) == true
-		return { success = false, error = string.format("door is %.1f studs away (max %d)", dist, self.MAX_DOOR_DISTANCE), data = data }
-	end
-
 	local function doorOpen()
 		return door:GetAttribute(self.DOOR_OPEN_ATTR) == true
+	end
+	local function doorPos()
+		local okP, pos = pcall(function()
+			return door:GetPivot().Position
+		end)
+		if okP then
+			return pos
+		end
+		return nil
+	end
+	local function refreshDistance()
+		local pos = doorPos()
+		if pos then
+			dist = (pos - hrp.Position).Magnitude
+			data.door_distance = math.floor(dist * 10) / 10
+		end
+		return dist
 	end
 
 	-- уже в целевом состоянии — успех без вызова
@@ -287,38 +344,79 @@ function Apartments:setDoorOpen(targetOpen, isCancelled)
 		return { success = true, data = data }
 	end
 
-	-- ждём, пока дверь освободится (анимация предыдущего переключения)
-	local busyDeadline = tick() + 4
-	while door:GetAttribute(self.DOOR_BUSY_ATTR) == true and tick() < busyDeadline do
-		if isCancelled and isCancelled() then
-			return { success = false, error = "cancelled", data = data }
+	-- перед закрытием убираем персонажа из проёма: стоим в дверях —
+	-- дверь физически не закроется или сразу откроется обратно.
+	-- Отшагиваем малыми шагами (как _moveTo), античит не триггерим.
+	if not targetOpen then
+		refreshDistance()
+		if dist < 2.5 then
+			local pos = doorPos()
+			if pos then
+				local away = hrp.Position - pos
+				away = Vector3.new(away.X, 0, away.Z)
+				if away.Magnitude < 0.5 then
+					local okL, look = pcall(function()
+						return door:GetPivot().LookVector
+					end)
+					away = (okL and look) and Vector3.new(look.X, 0, look.Z) or Vector3.new(1, 0, 0)
+				end
+				away = away.Unit
+				local target = hrp.Position + away * 3
+				for step = 1, 3 do
+					if isCancelled and isCancelled() then
+						return { success = false, error = "cancelled", data = data }
+					end
+					local cf = CFrame.new(Vector3.new(
+						hrp.Position.X + away.X,
+						hrp.Position.Y,
+						hrp.Position.Z + away.Z
+					)) * CFrame.Angles(0, select(2, hrp.CFrame:ToEulerAnglesYXZ()), 0)
+					pcall(function()
+						hrp.CFrame = cf
+						hrp.AssemblyLinearVelocity = Vector3.zero
+					end)
+					task.wait(0.2)
+					if refreshDistance() >= 2.5 then
+						break
+					end
+					if (Vector3.new(target.X - hrp.Position.X, 0, target.Z - hrp.Position.Z)).Magnitude < 0.3 then
+						break
+					end
+				end
+			end
 		end
-		task.wait(0.1)
 	end
 
-	-- МОБИЛЬНАЯ РЕПЛИКАЦИЯ: после подхода к двери сервер ещё ~1 с видит
-	-- персонажа на старом месте и МОЛЧА отклоняет ToggleApartmentDoor
-	-- (клиентская дистанция 18.4 < max 20, серверная — уже нет). Даём
-	-- позиции доехать до сервера и ретраим вызов до 4 раз: пока дверь
-	-- не перешла в целевое состояние, серверный вызов безопасен (no-op
-	-- или очередной reject — атрибут двери меняет только сервер).
+	-- МОБИЛЬНАЯ РЕПЛИКАЦИЯ: после подхода к двери сервер ещё ~1-2 с видит
+	-- персонажа на старом месте и МОЛЧА отклоняет ToggleApartmentDoor.
+	-- Ретраим вызов до 6 раз: пока дверь не перешла в целевое состояние,
+	-- серверный вызов безопасен (no-op или очередной reject — атрибут
+	-- двери меняет только сервер).
 	task.wait(1.0)
 	local attempts = {}
-	for attempt = 1, 4 do
+	for attempt = 1, 6 do
 		if isCancelled and isCancelled() then
 			return { success = false, error = "cancelled", data = data }
 		end
 		-- позиция могла откатиться (boundary) или дверь уже дошла до цели
-		local okPos, doorPos = pcall(function()
-			return door:GetPivot().Position
-		end)
-		if okPos and doorPos then
-			dist = (doorPos - hrp.Position).Magnitude
-			data.door_distance = math.floor(dist * 10) / 10
-			if dist > self.MAX_DOOR_DISTANCE then
-				data.open = doorOpen()
-				return { success = false, error = string.format("door is %.1f studs away (max %d)", dist, self.MAX_DOOR_DISTANCE), data = data }
+		if refreshDistance() > self.MAX_DOOR_DISTANCE then
+			data.open = doorOpen()
+			return { success = false, error = string.format("door is %.1f studs away (max %d)", dist, self.MAX_DOOR_DISTANCE), data = data }
+		end
+		if doorOpen() == targetOpen then
+			data.open = targetOpen
+			data.toggled = attempt > 1 or nil
+			data.attempts = attempt
+			return { success = true, data = data }
+		end
+		-- занятая дверь отклоняет toggle молча — ждём освобождения
+		-- именно здесь, а не один раз перед циклом (анимация чужого
+		-- переключения может начаться между попытками).
+		if not doorBusyWait(door, self.DOOR_BUSY_ATTR, 6, isCancelled) then
+			if isCancelled and isCancelled() then
+				return { success = false, error = "cancelled", data = data }
 			end
+			table.insert(attempts, string.format("attempt %d: door busy > 6s", attempt))
 		end
 		if doorOpen() == targetOpen then
 			data.open = targetOpen
@@ -334,7 +432,7 @@ function Apartments:setDoorOpen(targetOpen, isCancelled)
 			return { success = false, error = "toggle call failed: " .. tostring(callErr), data = data }
 		end
 		-- верификация: атрибут должен дойти до целевого состояния
-		local deadline = tick() + 2.5
+		local deadline = tick() + 5
 		while tick() < deadline do
 			if isCancelled and isCancelled() then
 				return { success = false, error = "cancelled", data = data }
@@ -345,10 +443,26 @@ function Apartments:setDoorOpen(targetOpen, isCancelled)
 				data.attempts = attempt
 				return { success = true, data = data }
 			end
-			task.wait(0.1)
+			task.wait(0.2)
 		end
-		table.insert(attempts, string.format("attempt %d: no state change in 2.5s (server rejected?)", attempt))
-		task.wait(1.0)
+		table.insert(attempts, string.format("attempt %d: no state change in 5s (server rejected or slow replication)", attempt))
+		task.wait(0.5)
+	end
+
+	-- финальная пауза: состояние может дойти с опозданием после
+	-- последнего вызова — это не ошибка, а медленная репликация.
+	local graceDeadline = tick() + 3
+	while tick() < graceDeadline do
+		if isCancelled and isCancelled() then
+			return { success = false, error = "cancelled", data = data }
+		end
+		if doorOpen() == targetOpen then
+			data.open = targetOpen
+			data.toggled = true
+			data.attempts = 7
+			return { success = true, data = data }
+		end
+		task.wait(0.2)
 	end
 
 	data.open = doorOpen()
