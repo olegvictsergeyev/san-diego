@@ -28,7 +28,12 @@ Vehicles.MAX_DRIVE_DIST = 20000
 -- Анти-чит: при реальной скорости ~613+ ст/с сервер качнул технику,
 -- обнулил скорость и откатил на точку нарушения (rewind).
 -- Кап 580 = максимум проверенный чистым заездом (предел 613 −5%).
-Vehicles.DRIVE_VMAX = 580
+-- С 2026-09-11 игра ужесточила профильную проверку: на массовых заездах
+-- сервер обнуляет скорость уже на ~405 ст/с (зафиксировано в логах:
+-- vmax=406 → knock). Шкала пересчитана по правилу «порог − 10% = уровень
+-- 10»: DRIVE_VMAX = 360 (405 × 0.9 с округлением вниз). Уточнение по
+-- замеру probe — см. DRIVE_VMAX_TABLE ниже/в DECISIONS.
+Vehicles.DRIVE_VMAX = 360
 -- Режим замера порога античита (probe=true у drive): разгон капами
 -- от PROBE_V0 с шагом PROBE_STEP каждые PROBE_STEP_SEC, пока игровое
 -- уведомление WarningGui не зафиксирует срабатывание. Порог = кап
@@ -389,6 +394,8 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance, 
 	local probeVmax = self.PROBE_V0
 	local probeStepAt = 0
 	local probeTriggered, probeTriggerV = false, nil
+	local probeMaxActual = 0
+	local probePlateauSince = nil
 	local root, err, model = self:_car()
 	if not root then
 		return { success = false, error = err }
@@ -532,15 +539,32 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance, 
 				probeTriggerV = math.floor(probeVmax)
 				abortReason = "probe: anticheat triggered"
 				phase = "brake"
-			elseif now - probeStepAt >= self.PROBE_STEP_SEC and probeVmax < self.DRIVE_VMAX then
-				probeVmax = math.min(probeVmax + self.PROBE_STEP, self.DRIVE_VMAX)
-				probeStepAt = now
-				capV = probeVmax
-				warn(string.format(
-					"[SanDiegoAgent][Vehicles] probe step: cap=%d actual=%d",
-					probeVmax,
-					math.floor(s.root.AssemblyLinearVelocity.Magnitude)
-				))
+			else
+				local actualNow = math.floor(s.root.AssemblyLinearVelocity.Magnitude)
+				probeMaxActual = math.max(probeMaxActual or 0, actualNow)
+				-- Плато: кап растёт, фактическая скорость нет (слабая
+				-- техника/низкая настройка) — WarningGui не наступит,
+				-- фиксируем физический потолок и заканчиваем.
+				if probeVmax - probeMaxActual >= 60 then
+					if not probePlateauSince then
+						probePlateauSince = now
+					elseif now - probePlateauSince >= 8 then
+						abortReason = string.format("probe: plateau at %d (cap %d)", probeMaxActual, probeVmax)
+						phase = "brake"
+					end
+				else
+					probePlateauSince = nil
+				end
+				if phase ~= "brake" and now - probeStepAt >= self.PROBE_STEP_SEC and probeVmax < self.DRIVE_VMAX then
+					probeVmax = math.min(probeVmax + self.PROBE_STEP, self.DRIVE_VMAX)
+					probeStepAt = now
+					capV = probeVmax
+					warn(string.format(
+						"[SanDiegoAgent][Vehicles] probe step: cap=%d actual=%d",
+						probeVmax,
+						actualNow
+					))
+				end
 			end
 		end
 		local p = root.Position
@@ -618,8 +642,10 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance, 
 		local speed = s.root.AssemblyLinearVelocity.Magnitude
 		-- сброс анти-чита/срыв сцепления: скорость рухнула при высокой
 		-- команде; на мобиле чтение скорости «скачет» — гистерезис
-		-- из 2 подряд тиков против ложных срабатываний
-		if phase ~= "brake" and ve > 30 and speed < ve * 0.35 then
+		-- из 2 подряд тиков против ложных срабатываний. В режиме замера
+		-- не прерываем: слабая техника физически не выходит на кап и даёт
+		-- ложные knock; сигнал замера — только WarningGui.
+		if not probe and phase ~= "brake" and ve > 30 and speed < ve * 0.35 then
 			knockTicks = knockTicks + 1
 			if knockTicks >= 2 then
 				abortReason = string.format("knock at v=%d", math.floor(ve))
@@ -634,7 +660,7 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance, 
 		-- с медленным торможением (байк сохраняет импульс, реальное
 		-- замедление слабее BRAKE_REAL) — допустим и НЕ считается ошибкой.
 		local targetDist = (Vector2.new(targetX, laneZ) - Vector2.new(p.X, p.Z)).Magnitude
-		if phase ~= "brake" and dir * (targetX - p.X) > 0 then
+		if not probe and phase ~= "brake" and dir * (targetX - p.X) > 0 then
 			if tick() - stuckAt >= 4 then
 				if v > 10 and (stuckDist - targetDist) < 1.5 then
 					abortReason = "stuck/locked"
@@ -711,6 +737,7 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance, 
 		data.probe_triggered = probeTriggered
 		data.probe_threshold = probeTriggerV
 		data.probe_cap_reached = math.floor(probeVmax)
+		data.probe_actual_max = probeMaxActual
 	end
 	-- верификация прибытия: без неё бэкенд цепляет следующие шаги сцена-
 	-- рия от НЕправильной точки — «приехал не туда», а дальше всё ломается
