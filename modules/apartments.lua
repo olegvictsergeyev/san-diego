@@ -387,13 +387,61 @@ function Apartments:setDoorOpen(targetOpen, isCancelled)
 		end
 	end
 
+	local function fireDoorTrigger(trigger)
+		if trigger == "prompt" then
+			local okP, prompt = pcall(function()
+				return door:FindFirstChildWhichIsA("ProximityPrompt", true)
+			end)
+			if okP and prompt then
+				if typeof(fireproximityprompt) == "function" then
+					pcall(fireproximityprompt, prompt)
+					return true
+				end
+				-- чистый вариант: эмуляция удержания E локальным игроком
+				local hold = 0
+				pcall(function()
+					hold = tonumber(prompt.HoldDuration) or 0
+				end)
+				pcall(function()
+					prompt:InputHoldBegin()
+				end)
+				task.wait(math.max(hold, 0.2) + 0.1)
+				pcall(function()
+					prompt:InputHoldEnd()
+				end)
+				return true
+			end
+			return false
+		end
+		if trigger == "clickdetector" then
+			local okC, detector = pcall(function()
+				return door:FindFirstChildWhichIsA("ClickDetector", true)
+			end)
+			if okC and detector and typeof(fireclickdetector) == "function" then
+				pcall(fireclickdetector, detector)
+				return true
+			end
+			return false
+		end
+		-- remote — последний фолбэк: после обновления игры сервер стал
+		-- молча отклонять ToggleApartmentDoor (reject виден в логах фермы:
+		-- 6/6 попыток без смены состояния), поэтому вызываем его только
+		-- если prompt/clickdetector на двери отсутствуют.
+		local okCall, callErr = pcall(function()
+			client.ApartmentService:ToggleApartmentDoor(door)
+		end)
+		if not okCall then
+			return nil, "toggle call failed: " .. tostring(callErr)
+		end
+		return true
+	end
+
 	-- МОБИЛЬНАЯ РЕПЛИКАЦИЯ: после подхода к двери сервер ещё ~1-2 с видит
-	-- персонажа на старом месте и МОЛЧА отклоняет ToggleApartmentDoor.
-	-- Ретраим вызов до 6 раз: пока дверь не перешла в целевое состояние,
-	-- серверный вызов безопасен (no-op или очередной reject — атрибут
-	-- двери меняет только сервер).
+	-- персонажа на старом месте и МОЛЧА отклоняет переключение. Ретраим
+	-- до 6 раз, чередуя каналы триггера: prompt → clickdetector → remote.
 	task.wait(1.0)
 	local attempts = {}
+	local triggers = { "prompt", "clickdetector", "remote" }
 	for attempt = 1, 6 do
 		if isCancelled and isCancelled() then
 			return { success = false, error = "cancelled", data = data }
@@ -424,12 +472,15 @@ function Apartments:setDoorOpen(targetOpen, isCancelled)
 			data.attempts = attempt
 			return { success = true, data = data }
 		end
-		local okCall, callErr = pcall(function()
-			client.ApartmentService:ToggleApartmentDoor(door)
-		end)
-		if not okCall then
+		local trigger = triggers[((attempt - 1) % #triggers) + 1]
+		local fired, fireErr = fireDoorTrigger(trigger)
+		if fired == nil then
 			data.open = doorOpen()
-			return { success = false, error = "toggle call failed: " .. tostring(callErr), data = data }
+			return { success = false, error = fireErr, data = data }
+		end
+		data.trigger = fired and trigger or nil
+		if not fired then
+			table.insert(attempts, string.format("attempt %d: no %s on door", attempt, trigger))
 		end
 		-- верификация: атрибут должен дойти до целевого состояния
 		local deadline = tick() + 5
@@ -445,7 +496,7 @@ function Apartments:setDoorOpen(targetOpen, isCancelled)
 			end
 			task.wait(0.2)
 		end
-		table.insert(attempts, string.format("attempt %d: no state change in 5s (server rejected or slow replication)", attempt))
+		table.insert(attempts, string.format("attempt %d (%s): no state change in 5s", attempt, trigger))
 		task.wait(0.5)
 	end
 
