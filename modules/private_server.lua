@@ -113,6 +113,13 @@ function PrivateServer:joinByCode(code)
     end
     print("[SanDiegoAgent][PrivateServer] CanJoinServerByCode result:", tostring(checkResult), typeof(checkResult) == "table" and "(table)" or "")
     if typeof(checkResult) == "table" and checkResult.Success == false then
+        -- «Уже в этом сервере» — это ЦЕЛЕВОЕ состояние команды, а не
+        -- ошибка: ферма шлёт join каждый цикл, и RBT-сценарий прерывался
+        -- на этом ответе. Считаем успехом, чтобы цикл шёл дальше.
+        local msg = typeof(checkResult.Message) == "string" and checkResult.Message or ""
+        if msg:lower():find("already in this server", 1, true) then
+            return { success = true, data = { joined = true, already = true, message = msg } }
+        end
         return { success = false, error = checkResult.Message or "server rejected join by code" }
     end
 

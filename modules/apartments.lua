@@ -337,6 +337,45 @@ function Apartments:setDoorOpen(targetOpen, isCancelled)
 		return dist
 	end
 
+	-- Автоподход: сценарий фермы нередко шлёт open_door с дистанции
+	-- 21-26 ст (прерывая цикл ошибкой «door is X studs away»). Раз дверь
+	-- уже выбрана и видна — дожимаем до неё малыми шагами сами (до 45 ст,
+	-- 8 с бюджета), вместо того чтобы требовать лишний move_to сценария.
+	if refreshDistance() > self.MAX_DOOR_DISTANCE then
+		local approachDeadline = tick() + 8
+		local steps = 0
+		while refreshDistance() > 8 and tick() < approachDeadline do
+			if isCancelled and isCancelled() then
+				return { success = false, error = "cancelled", data = data }
+			end
+			local pos = doorPos()
+			if not pos then
+				break
+			end
+			local toDoor = pos - hrp.Position
+			toDoor = Vector3.new(toDoor.X, 0, toDoor.Z)
+			if toDoor.Magnitude < 0.1 then
+				break
+			end
+			local step = toDoor.Unit * math.min(2, toDoor.Magnitude)
+			local _, yaw = hrp.CFrame:ToEulerAnglesYXZ()
+			pcall(function()
+				hrp.CFrame = CFrame.new(Vector3.new(hrp.Position.X + step.X, hrp.Position.Y, hrp.Position.Z + step.Z)) * CFrame.Angles(0, yaw, 0)
+				hrp.AssemblyLinearVelocity = Vector3.zero
+			end)
+			steps = steps + 1
+			task.wait(0.15)
+			if refreshDistance() <= self.MAX_DOOR_DISTANCE and steps >= 2 then
+				break
+			end
+		end
+		data.approach_steps = steps > 0 and steps or nil
+		if refreshDistance() > self.MAX_DOOR_DISTANCE then
+			data.open = doorOpen()
+			return { success = false, error = string.format("door is %.1f studs away (max %d)", dist, self.MAX_DOOR_DISTANCE), data = data }
+		end
+	end
+
 	-- уже в целевом состоянии — успех без вызова
 	if doorOpen() == targetOpen then
 		data.open = targetOpen
