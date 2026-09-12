@@ -190,7 +190,7 @@ function Apartments:rent(apartmentId, isCancelled)
 			end
 			task.wait(0.25)
 		end
-		table.insert(attempts, string.format("attempt %d: not confirmed in 4s (purchase fired)", attempt)))
+		table.insert(attempts, string.format("attempt %d: not confirmed in 4s (purchase fired)", attempt))
 		task.wait(1.0)
 	end
 
