@@ -387,16 +387,29 @@ function Apartments:setDoorOpen(targetOpen, isCancelled)
 		end
 	end
 
-	local function fireDoorTrigger(trigger)
-		if trigger == "prompt" then
-			local okP, prompt = pcall(function()
-				return door:FindFirstChildWhichIsA("ProximityPrompt", true)
-			end)
-			if okP and prompt then
-				if typeof(fireproximityprompt) == "function" then
-					pcall(fireproximityprompt, prompt)
-					return true
+	local function fireAllPrompts()
+		local okL, prompts = pcall(function()
+			local found = {}
+			for _, d in ipairs(door:GetDescendants()) do
+				if d:IsA("ProximityPrompt") and d.Enabled ~= false then
+					table.insert(found, d)
 				end
+			end
+			-- и сама дверь, если prompt лежит прямо на ней
+			if door:IsA("ProximityPrompt") and door.Enabled ~= false then
+				table.insert(found, door)
+			end
+			return found
+		end)
+		if not okL or #prompts == 0 then
+			return 0
+		end
+		local fired = 0
+		for _, prompt in ipairs(prompts) do
+			if typeof(fireproximityprompt) == "function" then
+				pcall(fireproximityprompt, prompt)
+				fired = fired + 1
+			else
 				-- чистый вариант: эмуляция удержания E локальным игроком
 				local hold = 0
 				pcall(function()
@@ -409,9 +422,15 @@ function Apartments:setDoorOpen(targetOpen, isCancelled)
 				pcall(function()
 					prompt:InputHoldEnd()
 				end)
-				return true
+				fired = fired + 1
 			end
-			return false
+		end
+		return fired
+	end
+
+	local function fireDoorTrigger(trigger)
+		if trigger == "prompt" then
+			return fireAllPrompts() > 0
 		end
 		if trigger == "clickdetector" then
 			local okC, detector = pcall(function()
@@ -423,10 +442,9 @@ function Apartments:setDoorOpen(targetOpen, isCancelled)
 			end
 			return false
 		end
-		-- remote — последний фолбэк: после обновления игры сервер стал
-		-- молча отклонять ToggleApartmentDoor (reject виден в логах фермы:
-		-- 6/6 попыток без смены состояния), поэтому вызываем его только
-		-- если prompt/clickdetector на двери отсутствуют.
+		-- remote — фолбэк: после обновления игры сервер стал молча
+		-- отклонять ToggleApartmentDoor, но вызов безопасен (no-op при
+		-- reject), поэтому дублируем им каждую попытку вместе с prompt.
 		local okCall, callErr = pcall(function()
 			client.ApartmentService:ToggleApartmentDoor(door)
 		end)
@@ -438,10 +456,10 @@ function Apartments:setDoorOpen(targetOpen, isCancelled)
 
 	-- МОБИЛЬНАЯ РЕПЛИКАЦИЯ: после подхода к двери сервер ещё ~1-2 с видит
 	-- персонажа на старом месте и МОЛЧА отклоняет переключение. Ретраим
-	-- до 6 раз, чередуя каналы триггера: prompt → clickdetector → remote.
+	-- до 6 раз: каждая попытка = ВСЕ ProximityPrompt двери (у открытой
+	-- двери prompt закрытия — отдельный экземпляр) + серверный remote.
 	task.wait(1.0)
 	local attempts = {}
-	local triggers = { "prompt", "clickdetector", "remote" }
 	for attempt = 1, 6 do
 		if isCancelled and isCancelled() then
 			return { success = false, error = "cancelled", data = data }
@@ -472,15 +490,15 @@ function Apartments:setDoorOpen(targetOpen, isCancelled)
 			data.attempts = attempt
 			return { success = true, data = data }
 		end
-		local trigger = triggers[((attempt - 1) % #triggers) + 1]
-		local fired, fireErr = fireDoorTrigger(trigger)
-		if fired == nil then
+		local promptFired = fireAllPrompts()
+		local remOk, remErr = fireDoorTrigger("remote")
+		if remOk == nil then
 			data.open = doorOpen()
-			return { success = false, error = fireErr, data = data }
+			return { success = false, error = remErr, data = data }
 		end
-		data.trigger = fired and trigger or nil
-		if not fired then
-			table.insert(attempts, string.format("attempt %d: no %s on door", attempt, trigger))
+		data.trigger = (promptFired > 0) and "prompt+remote" or "remote"
+		if promptFired == 0 then
+			table.insert(attempts, string.format("attempt %d: no prompts on door", attempt))
 		end
 		-- верификация: атрибут должен дойти до целевого состояния
 		local deadline = tick() + 5
@@ -496,7 +514,7 @@ function Apartments:setDoorOpen(targetOpen, isCancelled)
 			end
 			task.wait(0.2)
 		end
-		table.insert(attempts, string.format("attempt %d (%s): no state change in 5s", attempt, trigger))
+		table.insert(attempts, string.format("attempt %d: no state change in 5s", attempt))
 		task.wait(0.5)
 	end
 
