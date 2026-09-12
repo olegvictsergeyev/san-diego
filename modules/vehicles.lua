@@ -33,7 +33,7 @@ Vehicles.MAX_DRIVE_DIST = 20000
 -- vmax=406 → knock). Шкала пересчитана по правилу «порог − 10% = уровень
 -- 10»: DRIVE_VMAX = 360 (405 × 0.9 с округлением вниз). Уточнение по
 -- замеру probe — см. DRIVE_VMAX_TABLE ниже/в DECISIONS.
-Vehicles.DRIVE_VMAX = 360
+Vehicles.DRIVE_VMAX = 120
 -- Режим замера порога античита (probe=true у drive): разгон капами
 -- от PROBE_V0 с шагом PROBE_STEP каждые PROBE_STEP_SEC, пока игровое
 -- уведомление WarningGui не зафиксирует срабатывание. Порог = кап
