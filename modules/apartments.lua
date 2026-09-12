@@ -211,45 +211,27 @@ end
 -- Ближайшая дверь, которую игрок имеет право открывать/закрывать:
 -- своя парадная (ApartmentOwnerUserId == UserId) или любая Interior
 -- (совпадает с клиентским GetPromptMode). Возвращает door, distance, error.
--- Возвращает дверь для переключения. Приоритет: своя парадная дверь
--- (Front + владелец — мы), затем ближайшая интерьерная. Иначе сценарий
--- у коридора соседнего номера может цеплять чужую interior-дверь.
+-- Возвращает дверь для переключения: БЛИЖАЙШАЯ из доступных (interior
+-- любая или своя). ВАЖНО: приоритет «своя парадная вместо ближайшей»
+-- сломанно менять — сценарий фермы шлёт open_door с точек, откуда ближе
+-- interior-дверь (регрессия v2.12.33: «door is 25.5 studs away» каждый
+-- цикл). Чужая парадная дверь и так не допускается.
 function Apartments:findToggleableDoor(hrp)
 	local player = Players.LocalPlayer
-	local bestOwn, bestOwnDist = nil, math.huge
-	local bestInterior, bestInteriorDist = nil, math.huge
+	local best, bestDist = nil, math.huge
 	for _, door in ipairs(self:_doors()) do
-		local okP, pos = pcall(function()
-			return door:GetPivot().Position
-		end)
-		if okP and pos then
-			local dist = (pos - hrp.Position).Magnitude
-			local isOwnFront = door:GetAttribute(self.DOOR_KIND_ATTR) == self.DOOR_KIND_FRONT
-				and player ~= nil
-				and door:GetAttribute(self.OWNER_ATTR) == player.UserId
-			if isOwnFront and dist < bestOwnDist then
-				bestOwn, bestOwnDist = door, dist
-			elseif door:GetAttribute(self.DOOR_KIND_ATTR) == self.DOOR_KIND_INTERIOR and dist < bestInteriorDist then
-				bestInterior, bestInteriorDist = door, dist
-			end
+		local allowed = door:GetAttribute(self.DOOR_KIND_ATTR) == self.DOOR_KIND_INTERIOR
+		if not allowed and player then
+			allowed = door:GetAttribute(self.OWNER_ATTR) == player.UserId
 		end
-	end
-	local best, bestDist = bestOwn, bestOwnDist
-	if not best then
-		best, bestDist = bestInterior, bestInteriorDist
-	end
-	-- фолбэк: любая своя дверь (на случай нестандартного kind)
-	if not best and player then
-		for _, door in ipairs(self:_doors()) do
-			if door:GetAttribute(self.OWNER_ATTR) == player.UserId then
-				local okP, pos = pcall(function()
-					return door:GetPivot().Position
-				end)
-				if okP and pos then
-					local dist = (pos - hrp.Position).Magnitude
-					if dist < bestDist then
-						best, bestDist = door, dist
-					end
+		if allowed then
+			local okP, pos = pcall(function()
+				return door:GetPivot().Position
+			end)
+			if okP and pos then
+				local dist = (pos - hrp.Position).Magnitude
+				if dist < bestDist then
+					best, bestDist = door, dist
 				end
 			end
 		end
