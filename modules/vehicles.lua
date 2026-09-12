@@ -42,6 +42,9 @@ Vehicles.PROBE_V0 = 150
 Vehicles.PROBE_STEP = 10
 Vehicles.PROBE_STEP_SEC = 2
 Vehicles.PROBE_ACCEL = 30
+-- Потолок замера НЕ равен DRIVE_VMAX: фикс капа может быть ниже порога
+-- античита, а замер должен уметь до него дорасти (порог ~405 фиксировался).
+Vehicles.PROBE_VMAX = 500
 -- Допуск прибытия по X по умолчанию: |фактическая X − целевая| больше
 -- этого значения = ошибка missed target. Переопределяется параметром
 -- tolerance команды drive.
@@ -518,7 +521,7 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance, 
 	local timeout = math.max(math.abs(dx) / 200 + 40, math.abs(dx) / math.max(targetVmax, 30) * 1.5 + 40)
 	if probe then
 		-- Полный проход по шкале замера + запас на разгон/торможение.
-		timeout = (self.DRIVE_VMAX - self.PROBE_V0) / self.PROBE_STEP * self.PROBE_STEP_SEC + 90
+		timeout = (self.PROBE_VMAX - self.PROBE_V0) / self.PROBE_STEP * self.PROBE_STEP_SEC + 90
 	end
 	-- Медленные мобилки: тик длиннее номинала, поэтому dt меряем по
 	-- факту — иначе интегратор скорости врёт, а дистанция торможения
@@ -555,8 +558,8 @@ function Vehicles:drive(dx, laneZ, isCancelled, speedLevel, jumpOff, tolerance, 
 				else
 					probePlateauSince = nil
 				end
-				if phase ~= "brake" and now - probeStepAt >= self.PROBE_STEP_SEC and probeVmax < self.DRIVE_VMAX then
-					probeVmax = math.min(probeVmax + self.PROBE_STEP, self.DRIVE_VMAX)
+				if phase ~= "brake" and now - probeStepAt >= self.PROBE_STEP_SEC and probeVmax < self.PROBE_VMAX then
+					probeVmax = math.min(probeVmax + self.PROBE_STEP, self.PROBE_VMAX)
 					probeStepAt = now
 					capV = probeVmax
 					warn(string.format(
