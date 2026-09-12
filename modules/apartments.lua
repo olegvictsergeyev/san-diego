@@ -160,17 +160,14 @@ function Apartments:rent(apartmentId, isCancelled)
 		if isCancelled and isCancelled() then
 			return { success = false, error = "cancelled" }
 		end
-		local callResult = nil
-		local okCall, callErr = pcall(function()
-			callResult = client.ApartmentService:PurchaseApartment(door)
+		-- Вызов в отдельном потоке: InvokeServer без ответа сервера висит
+		-- навсегда (см. регрессию close_door). Верификация — по атрибуту
+		-- игрока ниже, ответ remote не нужен.
+		task.spawn(function()
+			pcall(function()
+				client.ApartmentService:PurchaseApartment(door)
+			end)
 		end)
-		if not okCall then
-			return {
-				success = false,
-				error = "purchase call failed: " .. tostring(callErr),
-				data = { apartment_id = doorAptId, door_distance = math.floor(dist * 10) / 10 },
-			}
-		end
 
 		-- Верификация: сервер ставит OwnedApartmentId на игрока.
 		local deadline = tick() + 4
@@ -193,7 +190,7 @@ function Apartments:rent(apartmentId, isCancelled)
 			end
 			task.wait(0.25)
 		end
-		table.insert(attempts, string.format("attempt %d: not confirmed in 4s (purchase_result=%s)", attempt, tostring(callResult)))
+		table.insert(attempts, string.format("attempt %d: not confirmed in 4s (purchase fired)", attempt)))
 		task.wait(1.0)
 	end
 
@@ -399,15 +396,19 @@ function Apartments:setDoorOpen(targetOpen, isCancelled)
 				pcall(fireproximityprompt, prompt)
 				fired = fired + 1
 			else
-				-- чистый вариант: эмуляция удержания E локальным игроком
+				-- чистый вариант: эмуляция удержания E локальным игроком.
+				-- HoldDuration капаем: битое/огромное значение prompt'а
+				-- не должно повесить команду (регрессия: close_door
+				-- завис на минуты, сценарий не завершался).
 				local hold = 0
 				pcall(function()
 					hold = tonumber(prompt.HoldDuration) or 0
 				end)
+				hold = math.min(math.max(hold, 0.2), 1.5)
 				pcall(function()
 					prompt:InputHoldBegin()
 				end)
-				task.wait(math.max(hold, 0.2) + 0.1)
+				task.wait(hold + 0.1)
 				pcall(function()
 					prompt:InputHoldEnd()
 				end)
@@ -434,12 +435,16 @@ function Apartments:setDoorOpen(targetOpen, isCancelled)
 		-- remote — фолбэк: после обновления игры сервер стал молча
 		-- отклонять ToggleApartmentDoor, но вызов безопасен (no-op при
 		-- reject), поэтому дублируем им каждую попытку вместе с prompt.
-		local okCall, callErr = pcall(function()
-			client.ApartmentService:ToggleApartmentDoor(door)
+		-- ВАЖНО: InvokeServer сериализуется на ответ сервера — если
+		-- обработчик не отвечает, pcall висит навсегда и убивает команду
+		-- (регрессия: close_door завис, сценарий не завершался). Поэтому
+		-- вызов — в отдельном потоке, а ждём смены атрибута двери (верификация
+		-- в основном цикле), а не ответ remote.
+		task.spawn(function()
+			pcall(function()
+				client.ApartmentService:ToggleApartmentDoor(door)
+			end)
 		end)
-		if not okCall then
-			return nil, "toggle call failed: " .. tostring(callErr)
-		end
 		return true
 	end
 
